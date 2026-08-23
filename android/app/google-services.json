@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "258429070767",
+    "project_id": "appmonitoreo-e3cda",
+    "storage_bucket": "appmonitoreo-e3cda.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:258429070767:android:bcc5f461e67c727accd35a",
+        "android_client_info": {
+          "package_name": "com.appmonitoreo.frontend"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB9NU1w43WXmJWwd8oW7HjvIFbEA08DxL4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
