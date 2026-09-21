@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart' as firebase_core;
-import 'screens/login_screen.dart';
+import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
 import 'services/firebase_service.dart' as app_firebase;
 import 'services/storage_service.dart';
+import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,12 +18,11 @@ class AppMonitoreo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Zonas Peligrosas',
+      title: 'AlertaZona',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.red),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.dark,
+      darkTheme: AppTheme.dark,
+      themeMode: ThemeMode.dark,
       home: const SplashRouter(),
     );
   }
@@ -51,7 +51,7 @@ class _SplashRouterState extends State<SplashRouter> {
       context,
       MaterialPageRoute(
         builder: (_) =>
-            token != null ? const HomeScreen() : const LoginScreen(),
+            token != null ? const HomeScreen() : const AuthScreen(),
       ),
     );
   }
