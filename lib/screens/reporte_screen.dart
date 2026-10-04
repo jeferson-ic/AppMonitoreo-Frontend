@@ -16,8 +16,11 @@ class ReporteScreen extends StatefulWidget {
 }
 
 class _ReporteScreenState extends State<ReporteScreen> {
+  static const _otro = 'Otro';
+
   final _formKey = GlobalKey<FormState>();
   final _descCtrl = TextEditingController();
+  final _tipoOtroCtrl = TextEditingController();
   List<String> _tipos = [];
   String? _tipoSeleccionado;
   String _urgencia = 'MEDIO';
@@ -37,8 +40,8 @@ class _ReporteScreenState extends State<ReporteScreen> {
       if (res.statusCode == 200) {
         final lista = (jsonDecode(res.body) as List).cast<String>();
         setState(() {
-          _tipos = lista;
-          _tipoSeleccionado = lista.isNotEmpty ? lista.first : null;
+          _tipos = [...lista, _otro];
+          _tipoSeleccionado = null;
           _loadingTipos = false;
         });
       }
@@ -47,15 +50,25 @@ class _ReporteScreenState extends State<ReporteScreen> {
     }
   }
 
+  String? get _tipoAEnviar {
+    if (_tipoSeleccionado == null) return null;
+    if (_tipoSeleccionado == _otro) {
+      final texto = _tipoOtroCtrl.text.trim();
+      return texto.isEmpty ? null : texto;
+    }
+    return _tipoSeleccionado;
+  }
+
   Future<void> _enviar() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_tipoSeleccionado == null) return;
+    final tipo = _tipoAEnviar;
+    if (tipo == null) return;
     setState(() => _loading = true);
     try {
       final token = await StorageService.getToken();
       final pos = widget.posicionInicial;
       final res = await ApiService.post('/incidentes', {
-        'tipoIncidente': _tipoSeleccionado,
+        'tipoIncidente': tipo,
         'descripcion': _descCtrl.text.trim(),
         'latitud': pos?.latitude ?? 0.0,
         'longitud': pos?.longitude ?? 0.0,
@@ -63,15 +76,18 @@ class _ReporteScreenState extends State<ReporteScreen> {
       if (!mounted) return;
       if (res.statusCode == 201) {
         int idIncidente = 0;
+        String estado = 'PENDIENTE';
         try {
           final data = jsonDecode(res.body);
           idIncidente = data['idIncidente'] ?? 0;
+          estado = data['estado'] ?? 'PENDIENTE';
         } catch (_) {}
         await Navigator.pushReplacement(
           context,
           MaterialPageRoute(
             builder: (_) => ReporteExitoScreen(
               idIncidente: idIncidente,
+              estado: estado,
               onVerReportes: widget.onVerReportes,
             ),
           ),
@@ -135,6 +151,7 @@ class _ReporteScreenState extends State<ReporteScreen> {
                             : DropdownButtonFormField<String>(
                                 initialValue: _tipoSeleccionado,
                                 decoration: const InputDecoration(),
+                                hint: const Text('Selecciona un tipo'),
                                 dropdownColor: AppColors.surface,
                                 items: _tipos
                                     .map((t) =>
@@ -144,6 +161,20 @@ class _ReporteScreenState extends State<ReporteScreen> {
                                 validator: (v) => v == null ? 'Selecciona un tipo' : null,
                               ),
                       ),
+                      if (_tipoSeleccionado == _otro) ...[
+                        const SizedBox(height: 12),
+                        LabeledField(
+                          label: 'Especifica el tipo',
+                          child: TextFormField(
+                            controller: _tipoOtroCtrl,
+                            decoration: const InputDecoration(hintText: 'Ej. Incendio'),
+                            validator: (v) => (_tipoSeleccionado == _otro &&
+                                    (v == null || v.trim().isEmpty))
+                                ? 'Requerido'
+                                : null,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       LabeledField(
                         label: 'Descripción',
@@ -293,6 +324,7 @@ class _ReporteScreenState extends State<ReporteScreen> {
   @override
   void dispose() {
     _descCtrl.dispose();
+    _tipoOtroCtrl.dispose();
     super.dispose();
   }
 }

@@ -3,13 +3,17 @@ import '../theme/app_theme.dart';
 
 class ReporteExitoScreen extends StatelessWidget {
   final int idIncidente;
+  final String estado;
   final VoidCallback? onVerReportes;
 
   const ReporteExitoScreen({
     super.key,
     required this.idIncidente,
+    this.estado = 'PENDIENTE',
     this.onVerReportes,
   });
+
+  bool get _yaValidado => estado.toUpperCase() == 'VALIDADO';
 
   String get _codigoSeguimiento {
     final anio = DateTime.now().year;
@@ -39,10 +43,12 @@ class ReporteExitoScreen extends StatelessWidget {
               const Text('¡Reporte enviado!',
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
               const SizedBox(height: 10),
-              const Text(
-                'Tu incidente ha sido registrado y está siendo procesado por el sistema de validación automática.',
+              Text(
+                _yaValidado
+                    ? 'Tu incidente coincidió con otros reportes cercanos y ya fue validado automáticamente.'
+                    : 'Tu incidente ha sido registrado y está siendo procesado por el sistema de validación automática.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.textSecondary, height: 1.4),
+                style: const TextStyle(color: AppColors.textSecondary, height: 1.4),
               ),
               const SizedBox(height: 28),
               Container(
@@ -63,14 +69,38 @@ class ReporteExitoScreen extends StatelessWidget {
                             fontWeight: FontWeight.w600,
                             letterSpacing: 0.6)),
                     const SizedBox(height: 6),
-                    Text(_codigoSeguimiento,
-                        style: const TextStyle(
-                            color: AppColors.primaryLight,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800)),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(_codigoSeguimiento,
+                            style: const TextStyle(
+                                color: AppColors.primaryLight,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800)),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: (_yaValidado ? AppColors.success : AppColors.warning)
+                                .withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            AppColors.estadoLabel(estado),
+                            style: TextStyle(
+                                color: _yaValidado ? AppColors.success : AppColors.warning,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 6),
-                    const Text('Recibirás una notificación cuando tu reporte sea validado.',
-                        style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                    Text(
+                      _yaValidado
+                          ? 'Ya es visible para otros usuarios en el mapa.'
+                          : 'Recibirás una notificación cuando tu reporte sea validado.',
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                    ),
                   ],
                 ),
               ),

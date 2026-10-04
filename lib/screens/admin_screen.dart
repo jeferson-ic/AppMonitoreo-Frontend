@@ -46,7 +46,7 @@ class _AdminScreenState extends State<AdminScreen> {
             .toList();
         setState(() {
           _validados = todos.where((i) => i.estado == 'VALIDADO').length;
-          _rechazados = todos.where((i) => i.estado == 'ELIMINADO').length;
+          _rechazados = todos.where((i) => i.estado == 'RECHAZADO').length;
         });
       }
     } catch (_) {}
@@ -145,7 +145,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             return _TarjetaPendiente(
                               incidente: inc,
                               onValidar: () => _accion(inc.idIncidente, 'validar'),
-                              onRechazar: () => _accion(inc.idIncidente, 'eliminar'),
+                              onRechazar: () => _accion(inc.idIncidente, 'rechazar'),
                             );
                           },
                         ),

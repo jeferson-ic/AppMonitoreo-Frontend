@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:intl/intl.dart';
 import '../models/incidente.dart';
 import '../services/api_service.dart';
 import '../services/storage_service.dart';
@@ -23,14 +24,17 @@ class _MapScreenState extends State<MapScreen> {
   Position? _posicion;
   List<Incidente> _incidentes = [];
   Set<Circle> _zonasCercles = {};
-  Timer? _alertTimer;
+  StreamSubscription<Position>? _posicionSub;
   final _notifPlugin = FlutterLocalNotificationsPlugin();
   final Set<int> _alertasYaNotificadas = {};
 
   String _filtroRiesgo = 'TODOS';
   String? _filtroTipo;
+  DateTimeRange? _filtroFechas;
 
-  static const _radioAlertaKm = 1.0;
+  // RNF07: el backend evalúa proximidad con radio de 150m; se usa un radio
+  // algo mayor en la app para alertar con margen antes de entrar a la zona.
+  static const _radioAlertaMetros = 300.0;
 
   @override
   void initState() {
@@ -71,13 +75,35 @@ class _MapScreenState extends State<MapScreen> {
     _mapController?.animateCamera(
         CameraUpdate.newLatLng(LatLng(pos.latitude, pos.longitude)));
     await _cargarIncidentes();
-    _iniciarPolling();
+    await _verificarAlerta(pos);
+    _iniciarSeguimientoUbicacion();
+  }
+
+  void _iniciarSeguimientoUbicacion() {
+    // RNF06: reacciona a cada cambio de ubicación relevante (no a cada
+    // micro-jitter del GPS) en vez de refrescar con un timer fijo.
+    const settings = LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 25);
+    _posicionSub = Geolocator.getPositionStream(locationSettings: settings)
+        .listen((pos) async {
+      setState(() => _posicion = pos);
+      _mapController?.animateCamera(
+          CameraUpdate.newLatLng(LatLng(pos.latitude, pos.longitude)));
+      await _verificarAlerta(pos);
+    });
   }
 
   Future<void> _cargarIncidentes() async {
     try {
       final token = await StorageService.getToken();
-      final res = await ApiService.get('/incidentes', token: token);
+      final rango = _filtroFechas;
+      final queryParams = rango == null
+          ? null
+          : {
+              'fechaDesde': DateFormat('yyyy-MM-dd').format(rango.start),
+              'fechaHasta': DateFormat('yyyy-MM-dd').format(rango.end),
+            };
+      final res =
+          await ApiService.get('/incidentes', token: token, queryParams: queryParams);
       if (res.statusCode == 200) {
         final lista = (jsonDecode(res.body) as List)
             .map((j) => Incidente.fromJson(j))
@@ -86,6 +112,24 @@ class _MapScreenState extends State<MapScreen> {
         await _cargarZonasRiesgo();
       }
     } catch (_) {}
+  }
+
+  Future<void> _seleccionarRangoFechas() async {
+    final ahora = DateTime.now();
+    final rango = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(ahora.year - 2),
+      lastDate: ahora,
+      initialDateRange: _filtroFechas,
+    );
+    if (rango == null) return;
+    setState(() => _filtroFechas = rango);
+    await _cargarIncidentes();
+  }
+
+  void _limpiarFiltroFechas() {
+    setState(() => _filtroFechas = null);
+    _cargarIncidentes();
   }
 
   List<Incidente> get _incidentesFiltrados => _incidentes.where((i) {
@@ -138,47 +182,45 @@ class _MapScreenState extends State<MapScreen> {
     } catch (_) {}
   }
 
-  void _iniciarPolling() {
-    _alertTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
-      if (_posicion == null) return;
-      try {
-        final token = await StorageService.getToken();
-        final res = await ApiService.get('/incidentes/cercanos',
-            token: token,
-            queryParams: {
-              'lat': _posicion!.latitude.toString(),
-              'lng': _posicion!.longitude.toString(),
-              'radioKm': _radioAlertaKm.toString(),
-            });
-        if (res.statusCode == 200) {
-          final cercanos = (jsonDecode(res.body) as List)
-              .map((j) => Incidente.fromJson(j))
-              .where((i) => i.nivelRiesgo == 'ALTO')
-              .toList();
-          for (final inc in cercanos) {
-            if (_alertasYaNotificadas.contains(inc.idIncidente)) continue;
-            _alertasYaNotificadas.add(inc.idIncidente);
-            _notifPlugin.show(
-              id: inc.idIncidente,
-              title: '⚠️ Alerta zona ALTA',
-              body: '${inc.tipoIncidente} reportado a menos de $_radioAlertaKm km',
-              notificationDetails: const NotificationDetails(
-                android: AndroidNotificationDetails(
-                  'zonas_peligrosas', 'Alertas de zonas peligrosas',
-                  importance: Importance.high,
-                  priority: Priority.high,
-                ),
-              ),
-            );
-          }
-        }
-      } catch (_) {}
-    });
+  Future<void> _verificarAlerta(Position pos) async {
+    try {
+      final token = await StorageService.getToken();
+      final res = await ApiService.get('/alertas/verificar',
+          token: token,
+          queryParams: {
+            'lat': pos.latitude.toString(),
+            'lng': pos.longitude.toString(),
+            'radioMetros': _radioAlertaMetros.toString(),
+          });
+      if (res.statusCode != 200) return;
+      final data = jsonDecode(res.body);
+      if (data['enZonaDeRiesgo'] != true) return;
+      final detalle = (data['detalle'] as List? ?? [])
+          .map((j) => Incidente.fromJson(j))
+          .toList();
+      for (final inc in detalle) {
+        if (_alertasYaNotificadas.contains(inc.idIncidente)) continue;
+        _alertasYaNotificadas.add(inc.idIncidente);
+        _notifPlugin.show(
+          id: inc.idIncidente,
+          title: '⚠️ Alerta zona de riesgo alto',
+          body:
+              '${inc.tipoIncidente} reportado a menos de ${_radioAlertaMetros.round()}m',
+          notificationDetails: const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'zonas_peligrosas', 'Alertas de zonas peligrosas',
+              importance: Importance.high,
+              priority: Priority.high,
+            ),
+          ),
+        );
+      }
+    } catch (_) {}
   }
 
   @override
   void dispose() {
-    _alertTimer?.cancel();
+    _posicionSub?.cancel();
     _mapController?.dispose();
     super.dispose();
   }
@@ -298,6 +340,15 @@ class _MapScreenState extends State<MapScreen> {
               label: Text(_filtroTipo ?? 'Tipo'),
               avatar: const Icon(Icons.filter_list, size: 16),
             ),
+          ),
+          const SizedBox(width: 8),
+          InputChip(
+            label: Text(_filtroFechas == null
+                ? 'Fecha'
+                : '${DateFormat('dd/MM').format(_filtroFechas!.start)} - ${DateFormat('dd/MM').format(_filtroFechas!.end)}'),
+            avatar: const Icon(Icons.date_range, size: 16),
+            onPressed: _seleccionarRangoFechas,
+            onDeleted: _filtroFechas == null ? null : _limpiarFiltroFechas,
           ),
         ],
       ),

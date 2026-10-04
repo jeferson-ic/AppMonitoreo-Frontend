@@ -32,13 +32,15 @@ class AppColors {
 
   static Color estadoColor(String estado) => switch (estado.toUpperCase()) {
         'VALIDADO' => success,
-        'ELIMINADO' => danger,
+        'RECHAZADO' => danger,
+        'ELIMINADO' => textMuted,
         _ => warning,
       };
 
   static String estadoLabel(String estado) => switch (estado.toUpperCase()) {
         'VALIDADO' => 'Validado',
-        'ELIMINADO' => 'Rechazado',
+        'RECHAZADO' => 'Rechazado',
+        'ELIMINADO' => 'Eliminado',
         _ => 'Pendiente de revisión',
       };
 }
