@@ -7,6 +7,7 @@ class Incidente {
   final String nivelRiesgo;
   final String fechaIncidente;
   final String estado;
+  final int reportesCoincidentes;
 
   const Incidente({
     required this.idIncidente,
@@ -17,6 +18,7 @@ class Incidente {
     required this.nivelRiesgo,
     required this.fechaIncidente,
     required this.estado,
+    this.reportesCoincidentes = 1,
   });
 
   factory Incidente.fromJson(Map<String, dynamic> j) => Incidente(
@@ -28,5 +30,7 @@ class Incidente {
         nivelRiesgo: j['nivelRiesgo'] ?? 'MEDIO',
         fechaIncidente: j['fechaIncidente'] ?? '',
         estado: j['estado'] ?? 'PENDIENTE',
+        reportesCoincidentes:
+            (j['reportesCoincidentes'] as num?)?.toInt() ?? 1,
       );
 }

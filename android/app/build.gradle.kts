@@ -30,7 +30,8 @@ android {
 
     defaultConfig {
         applicationId = "com.appmonitoreo.frontend"
-        minSdk = flutter.minSdkVersion
+        // RNF04: la app debe funcionar en Android 8.0 (API 26) o superior.
+        minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

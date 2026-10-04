@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import '../services/storage_service.dart';
-import 'map_screen.dart';
+import 'buscar_screen.dart';
 import 'historial_screen.dart';
-import 'admin_screen.dart';
-import 'login_screen.dart';
+import 'map_screen.dart';
+import 'perfil_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -13,66 +12,30 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _indice = 0;
-  String _rol = 'USUARIO';
-  String _nombre = '';
 
-  @override
-  void initState() {
-    super.initState();
-    _cargarPerfil();
-  }
-
-  Future<void> _cargarPerfil() async {
-    final rol = await StorageService.getRol() ?? 'USUARIO';
-    final nombre = await StorageService.getNombre() ?? '';
-    setState(() {
-      _rol = rol;
-      _nombre = nombre;
-    });
-  }
-
-  Future<void> _cerrarSesion() async {
-    await StorageService.clear();
-    if (!mounted) return;
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-      (_) => false,
-    );
-  }
+  void _irA(int indice) => setState(() => _indice = indice);
 
   List<Widget> get _pantallas => [
-        const MapScreen(),
+        MapScreen(onNavegarTab: _irA),
+        const BuscarScreen(),
         const HistorialScreen(),
-        if (_rol == 'ADMIN') const AdminScreen(),
-      ];
-
-  List<BottomNavigationBarItem> get _items => [
-        const BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Mapa'),
-        const BottomNavigationBarItem(
-            icon: Icon(Icons.history), label: 'Historial'),
-        if (_rol == 'ADMIN')
-          const BottomNavigationBarItem(
-              icon: Icon(Icons.admin_panel_settings), label: 'Admin'),
+        const PerfilScreen(),
       ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Hola, $_nombre'),
-        actions: [
-          IconButton(
-              icon: const Icon(Icons.logout),
-              tooltip: 'Cerrar sesión',
-              onPressed: _cerrarSesion),
-        ],
-      ),
       body: IndexedStack(index: _indice, children: _pantallas),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _indice,
-        onTap: (i) => setState(() => _indice = i),
-        items: _items,
+        onTap: _irA,
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Inicio'),
+          BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Buscar'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.notifications_none_rounded), label: 'Alertas'),
+          BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'Perfil'),
+        ],
       ),
     );
   }

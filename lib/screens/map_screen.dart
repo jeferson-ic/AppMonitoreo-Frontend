@@ -4,13 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:intl/intl.dart';
 import '../models/incidente.dart';
 import '../services/api_service.dart';
 import '../services/storage_service.dart';
+import '../theme/app_theme.dart';
+import 'incidente_detalle_screen.dart';
 import 'reporte_screen.dart';
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  final void Function(int indice)? onNavegarTab;
+  const MapScreen({super.key, this.onNavegarTab});
   @override
   State<MapScreen> createState() => _MapScreenState();
 }
@@ -18,13 +22,19 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   GoogleMapController? _mapController;
   Position? _posicion;
-  Set<Marker> _marcadores = {};
+  List<Incidente> _incidentes = [];
   Set<Circle> _zonasCercles = {};
-  Timer? _alertTimer;
+  StreamSubscription<Position>? _posicionSub;
   final _notifPlugin = FlutterLocalNotificationsPlugin();
   final Set<int> _alertasYaNotificadas = {};
 
-  static const _radioAlertaKm = 1.0;
+  String _filtroRiesgo = 'TODOS';
+  String? _filtroTipo;
+  DateTimeRange? _filtroFechas;
+
+  // RNF07: el backend evalúa proximidad con radio de 150m; se usa un radio
+  // algo mayor en la app para alertar con margen antes de entrar a la zona.
+  static const _radioAlertaMetros = 300.0;
 
   @override
   void initState() {
@@ -65,39 +75,85 @@ class _MapScreenState extends State<MapScreen> {
     _mapController?.animateCamera(
         CameraUpdate.newLatLng(LatLng(pos.latitude, pos.longitude)));
     await _cargarIncidentes();
-    _iniciarPolling();
+    await _verificarAlerta(pos);
+    _iniciarSeguimientoUbicacion();
+  }
+
+  void _iniciarSeguimientoUbicacion() {
+    // RNF06: reacciona a cada cambio de ubicación relevante (no a cada
+    // micro-jitter del GPS) en vez de refrescar con un timer fijo.
+    const settings = LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 25);
+    _posicionSub = Geolocator.getPositionStream(locationSettings: settings)
+        .listen((pos) async {
+      setState(() => _posicion = pos);
+      _mapController?.animateCamera(
+          CameraUpdate.newLatLng(LatLng(pos.latitude, pos.longitude)));
+      await _verificarAlerta(pos);
+    });
   }
 
   Future<void> _cargarIncidentes() async {
     try {
       final token = await StorageService.getToken();
-      final res = await ApiService.get('/incidentes', token: token);
+      final rango = _filtroFechas;
+      final queryParams = rango == null
+          ? null
+          : {
+              'fechaDesde': DateFormat('yyyy-MM-dd').format(rango.start),
+              'fechaHasta': DateFormat('yyyy-MM-dd').format(rango.end),
+            };
+      final res =
+          await ApiService.get('/incidentes', token: token, queryParams: queryParams);
       if (res.statusCode == 200) {
         final lista = (jsonDecode(res.body) as List)
             .map((j) => Incidente.fromJson(j))
             .toList();
-        setState(() {
-          _marcadores = lista.map(_incidenteAMarcador).toSet();
-        });
+        setState(() => _incidentes = lista);
         await _cargarZonasRiesgo();
       }
     } catch (_) {}
   }
 
+  Future<void> _seleccionarRangoFechas() async {
+    final ahora = DateTime.now();
+    final rango = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(ahora.year - 2),
+      lastDate: ahora,
+      initialDateRange: _filtroFechas,
+    );
+    if (rango == null) return;
+    setState(() => _filtroFechas = rango);
+    await _cargarIncidentes();
+  }
+
+  void _limpiarFiltroFechas() {
+    setState(() => _filtroFechas = null);
+    _cargarIncidentes();
+  }
+
+  List<Incidente> get _incidentesFiltrados => _incidentes.where((i) {
+        final pasaRiesgo = _filtroRiesgo == 'TODOS' || i.nivelRiesgo == _filtroRiesgo;
+        final pasaTipo = _filtroTipo == null || i.tipoIncidente == _filtroTipo;
+        return pasaRiesgo && pasaTipo;
+      }).toList();
+
+  Set<Marker> get _marcadores => _incidentesFiltrados.map(_incidenteAMarcador).toSet();
+
   Marker _incidenteAMarcador(Incidente inc) {
-    final color = switch (inc.nivelRiesgo) {
-      'ALTO' => BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-      'MEDIO' =>
-        BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-      _ => BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
+    final hue = switch (inc.nivelRiesgo) {
+      'ALTO' => BitmapDescriptor.hueRed,
+      'MEDIO' => BitmapDescriptor.hueOrange,
+      _ => BitmapDescriptor.hueAzure,
     };
     return Marker(
       markerId: MarkerId(inc.idIncidente.toString()),
       position: LatLng(inc.latitud, inc.longitud),
-      icon: color,
-      infoWindow: InfoWindow(
-          title: inc.tipoIncidente,
-          snippet: '${inc.nivelRiesgo} · ${inc.estado}'),
+      icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => IncidenteDetalleScreen(incidente: inc)),
+      ),
     );
   }
 
@@ -126,47 +182,45 @@ class _MapScreenState extends State<MapScreen> {
     } catch (_) {}
   }
 
-  void _iniciarPolling() {
-    _alertTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
-      if (_posicion == null) return;
-      try {
-        final token = await StorageService.getToken();
-        final res = await ApiService.get('/incidentes/cercanos',
-            token: token,
-            queryParams: {
-              'lat': _posicion!.latitude.toString(),
-              'lng': _posicion!.longitude.toString(),
-              'radioKm': _radioAlertaKm.toString(),
-            });
-        if (res.statusCode == 200) {
-          final cercanos = (jsonDecode(res.body) as List)
-              .map((j) => Incidente.fromJson(j))
-              .where((i) => i.nivelRiesgo == 'ALTO')
-              .toList();
-          for (final inc in cercanos) {
-            if (_alertasYaNotificadas.contains(inc.idIncidente)) continue;
-            _alertasYaNotificadas.add(inc.idIncidente);
-            _notifPlugin.show(
-              id: inc.idIncidente,
-              title: '⚠️ Alerta zona ALTA',
-              body: '${inc.tipoIncidente} reportado a menos de $_radioAlertaKm km',
-              notificationDetails: const NotificationDetails(
-                android: AndroidNotificationDetails(
-                  'zonas_peligrosas', 'Alertas de zonas peligrosas',
-                  importance: Importance.high,
-                  priority: Priority.high,
-                ),
-              ),
-            );
-          }
-        }
-      } catch (_) {}
-    });
+  Future<void> _verificarAlerta(Position pos) async {
+    try {
+      final token = await StorageService.getToken();
+      final res = await ApiService.get('/alertas/verificar',
+          token: token,
+          queryParams: {
+            'lat': pos.latitude.toString(),
+            'lng': pos.longitude.toString(),
+            'radioMetros': _radioAlertaMetros.toString(),
+          });
+      if (res.statusCode != 200) return;
+      final data = jsonDecode(res.body);
+      if (data['enZonaDeRiesgo'] != true) return;
+      final detalle = (data['detalle'] as List? ?? [])
+          .map((j) => Incidente.fromJson(j))
+          .toList();
+      for (final inc in detalle) {
+        if (_alertasYaNotificadas.contains(inc.idIncidente)) continue;
+        _alertasYaNotificadas.add(inc.idIncidente);
+        _notifPlugin.show(
+          id: inc.idIncidente,
+          title: '⚠️ Alerta zona de riesgo alto',
+          body:
+              '${inc.tipoIncidente} reportado a menos de ${_radioAlertaMetros.round()}m',
+          notificationDetails: const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'zonas_peligrosas', 'Alertas de zonas peligrosas',
+              importance: Importance.high,
+              priority: Priority.high,
+            ),
+          ),
+        );
+      }
+    } catch (_) {}
   }
 
   @override
   void dispose() {
-    _alertTimer?.cancel();
+    _posicionSub?.cancel();
     _mapController?.dispose();
     super.dispose();
   }
@@ -177,26 +231,196 @@ class _MapScreenState extends State<MapScreen> {
         ? LatLng(_posicion!.latitude, _posicion!.longitude)
         : const LatLng(-12.0464, -77.0428);
 
+    final tipos = _incidentes.map((i) => i.tipoIncidente).toSet().toList();
+
     return Scaffold(
-      body: GoogleMap(
-        initialCameraPosition: CameraPosition(target: posInicial, zoom: 15),
-        onMapCreated: (c) => _mapController = c,
-        myLocationEnabled: true,
-        myLocationButtonEnabled: true,
-        markers: _marcadores,
-        circles: _zonasCercles,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Column(
+              children: [
+                _buildHeader(),
+                _buildFiltros(tipos),
+                Expanded(
+                  child: Stack(
+                    children: [
+                      GoogleMap(
+                        initialCameraPosition:
+                            CameraPosition(target: posInicial, zoom: 15),
+                        onMapCreated: (c) => _mapController = c,
+                        myLocationEnabled: true,
+                        myLocationButtonEnabled: true,
+                        markers: _marcadores,
+                        circles: _zonasCercles,
+                      ),
+                      Positioned(top: 12, right: 12, child: _buildContador()),
+                      Positioned(bottom: 12, left: 12, child: _buildLeyenda()),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: AppColors.primary,
         onPressed: () async {
           final resultado = await Navigator.push<bool>(
             context,
             MaterialPageRoute(
-                builder: (_) => ReporteScreen(posicionInicial: _posicion)),
+              builder: (_) => ReporteScreen(
+                posicionInicial: _posicion,
+                onVerReportes: () => widget.onNavegarTab?.call(2),
+              ),
+            ),
           );
           if (resultado == true) _cargarIncidentes();
         },
-        child: const Icon(Icons.add),
+        icon: const Icon(Icons.add),
+        label: const Text('Reportar incidente'),
       ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 16, 8),
+      child: Row(
+        children: [
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('AlertaZona',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                Text('Ciudad de México · Hoy',
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+              ],
+            ),
+          ),
+          CircleAvatar(
+            radius: 19,
+            backgroundColor: AppColors.surface,
+            child: IconButton(
+              icon: const Icon(Icons.person_outline, size: 20),
+              onPressed: () => widget.onNavegarTab?.call(3),
+              tooltip: 'Perfil',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFiltros(List<String> tipos) {
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          _chipRiesgo('TODOS', 'Todos'),
+          const SizedBox(width: 8),
+          _chipRiesgo('ALTO', 'Alto'),
+          const SizedBox(width: 8),
+          _chipRiesgo('MEDIO', 'Medio'),
+          const SizedBox(width: 8),
+          _chipRiesgo('BAJO', 'Bajo'),
+          const SizedBox(width: 8),
+          PopupMenuButton<String?>(
+            color: AppColors.surface,
+            initialValue: _filtroTipo,
+            onSelected: (v) => setState(() => _filtroTipo = v),
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: null, child: Text('Todos los tipos')),
+              ...tipos.map((t) => PopupMenuItem(value: t, child: Text(t))),
+            ],
+            child: Chip(
+              label: Text(_filtroTipo ?? 'Tipo'),
+              avatar: const Icon(Icons.filter_list, size: 16),
+            ),
+          ),
+          const SizedBox(width: 8),
+          InputChip(
+            label: Text(_filtroFechas == null
+                ? 'Fecha'
+                : '${DateFormat('dd/MM').format(_filtroFechas!.start)} - ${DateFormat('dd/MM').format(_filtroFechas!.end)}'),
+            avatar: const Icon(Icons.date_range, size: 16),
+            onPressed: _seleccionarRangoFechas,
+            onDeleted: _filtroFechas == null ? null : _limpiarFiltroFechas,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chipRiesgo(String valor, String label) {
+    final activo = _filtroRiesgo == valor;
+    return ChoiceChip(
+      label: Text(label),
+      selected: activo,
+      onSelected: (_) => setState(() => _filtroRiesgo = valor),
+      selectedColor: AppColors.primary,
+      labelStyle: TextStyle(
+        color: activo ? Colors.white : AppColors.textSecondary,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+
+  Widget _buildContador() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        children: [
+          Text('${_incidentesFiltrados.length}',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          const Text('incidentes',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLeyenda() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _leyendaFila(AppColors.riesgoAlto, 'Riesgo Alto'),
+          const SizedBox(height: 4),
+          _leyendaFila(AppColors.riesgoMedio, 'Riesgo Medio'),
+          const SizedBox(height: 4),
+          _leyendaFila(AppColors.riesgoBajo, 'Riesgo Bajo'),
+        ],
+      ),
+    );
+  }
+
+  Widget _leyendaFila(Color color, String texto) {
+    return Row(
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(texto, style: const TextStyle(fontSize: 11)),
+      ],
     );
   }
 }
