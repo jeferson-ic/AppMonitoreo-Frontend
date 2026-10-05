@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import '../services/sesion_service.dart';
 import '../services/storage_service.dart';
 import '../theme/app_theme.dart';
 import 'admin_screen.dart';
-import 'auth_screen.dart';
 import 'metrics_screen.dart';
 
 class PerfilScreen extends StatefulWidget {
@@ -26,6 +26,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
     final rol = await StorageService.getRol() ?? 'USUARIO';
     final nombre = await StorageService.getNombre() ?? '';
     final correo = await StorageService.getCorreo() ?? '';
+    if (!mounted) return;
     setState(() {
       _rol = rol;
       _nombre = nombre;
@@ -34,13 +35,18 @@ class _PerfilScreenState extends State<PerfilScreen> {
   }
 
   Future<void> _cerrarSesion() async {
-    await StorageService.clear();
-    if (!mounted) return;
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const AuthScreen()),
-      (_) => false,
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cerrar sesión'),
+        content: const Text('¿Seguro que quieres salir de tu cuenta?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Salir')),
+        ],
+      ),
     );
+    if (confirmar == true) await SesionService.cerrar();
   }
 
   String get _iniciales {
