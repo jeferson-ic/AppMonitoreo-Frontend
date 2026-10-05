@@ -15,8 +15,6 @@ class IncidenteDetalleScreen extends StatefulWidget {
 }
 
 class _IncidenteDetalleScreenState extends State<IncidenteDetalleScreen> {
-  bool _siguiendo = false;
-
   String get _codigo => 'INC-${widget.incidente.idIncidente.toString().padLeft(3, '0')}';
 
   String get _fechaFormateada => formatearFechaHora(widget.incidente.fechaIncidente);
@@ -144,38 +142,14 @@ class _IncidenteDetalleScreenState extends State<IncidenteDetalleScreen> {
                       ),
                     ]),
                   ),
-                  const SizedBox(height: 12),
-                  _card(
-                    label: 'REPORTES COINCIDENTES',
-                    child: Row(children: [
-                      const Icon(Icons.people_alt_rounded,
-                          size: 16, color: AppColors.purple),
-                      const SizedBox(width: 6),
-                      Text('${inc.reportesCoincidentes} usuarios'),
-                    ]),
-                  ),
                   const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _compartir,
-                          icon: const Icon(Icons.ios_share, size: 18),
-                          label: const Text('Compartir'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => setState(() => _siguiendo = !_siguiendo),
-                          icon: Icon(
-                              _siguiendo ? Icons.check_circle : Icons.notifications_none,
-                              size: 18,
-                              color: _siguiendo ? AppColors.success : null),
-                          label: Text(_siguiendo ? 'Siguiendo' : 'Seguir'),
-                        ),
-                      ),
-                    ],
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _compartir,
+                      icon: const Icon(Icons.copy_rounded, size: 18),
+                      label: const Text('Copiar datos del incidente'),
+                    ),
                   ),
                 ],
               ),

@@ -33,7 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Inicio'),
           BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Buscar'),
           BottomNavigationBarItem(
-              icon: Icon(Icons.notifications_none_rounded), label: 'Alertas'),
+              icon: Icon(Icons.assignment_outlined), label: 'Mis reportes'),
           BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'Perfil'),
         ],
       ),

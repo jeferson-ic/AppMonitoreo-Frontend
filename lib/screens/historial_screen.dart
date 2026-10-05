@@ -1,11 +1,12 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../models/incidente.dart';
 import '../services/api_service.dart';
+import '../services/eventos_app.dart';
 import '../services/storage_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/fecha_utils.dart';
 import '../widgets/badges.dart';
+import '../widgets/mensaje_lista.dart';
 import 'incidente_detalle_screen.dart';
 
 class HistorialScreen extends StatefulWidget {
@@ -17,26 +18,42 @@ class HistorialScreen extends StatefulWidget {
 class _HistorialScreenState extends State<HistorialScreen> {
   List<Incidente> _reportes = [];
   bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
+    EventosApp.incidentesCambiaron.addListener(_cargar);
     _cargar();
   }
 
+  @override
+  void dispose() {
+    EventosApp.incidentesCambiaron.removeListener(_cargar);
+    super.dispose();
+  }
+
   Future<void> _cargar() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final token = await StorageService.getToken();
       final res = await ApiService.get('/incidentes/mis-reportes', token: token);
+      if (!mounted) return;
       if (res.statusCode == 200) {
         setState(() {
-          _reportes = (jsonDecode(res.body) as List)
+          _reportes = (ApiService.decodificar(res) as List)
               .map((j) => Incidente.fromJson(j))
               .toList();
         });
+      } else {
+        setState(() => _error = 'No se pudieron cargar tus reportes');
       }
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) setState(() => _error = ApiService.mensajeExcepcion(e));
+    }
     if (mounted) setState(() => _loading = false);
   }
 
@@ -59,13 +76,21 @@ class _HistorialScreenState extends State<HistorialScreen> {
               ),
             ),
             Expanded(
-              child: _loading
+              child: _loading && _reportes.isEmpty
                   ? const Center(child: CircularProgressIndicator())
-                  : _reportes.isEmpty
-                      ? const Center(
-                          child: Text('Aún no tienes reportes',
-                              style: TextStyle(color: AppColors.textMuted)))
+                  : RefreshIndicator(
+                      onRefresh: _cargar,
+                      child: _error != null
+                      ? MensajeLista(
+                          mensaje: _error!,
+                          icono: Icons.cloud_off_rounded,
+                          onReintentar: _cargar)
+                      : _reportes.isEmpty
+                      ? const MensajeLista(
+                          mensaje: 'Aún no tienes reportes.\n'
+                              'Usa "Reportar incidente" en el mapa para crear uno.')
                       : ListView.separated(
+                          physics: const AlwaysScrollableScrollPhysics(),
                           padding: const EdgeInsets.all(16),
                           itemCount: _reportes.length,
                           separatorBuilder: (_, _) => const SizedBox(height: 10),
@@ -82,6 +107,7 @@ class _HistorialScreenState extends State<HistorialScreen> {
                             );
                           },
                         ),
+                    ),
             ),
           ],
         ),

@@ -1,11 +1,12 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../models/incidente.dart';
 import '../services/api_service.dart';
+import '../services/eventos_app.dart';
 import '../services/storage_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/fecha_utils.dart';
 import '../widgets/badges.dart';
+import '../widgets/mensaje_lista.dart';
 import 'incidente_detalle_screen.dart';
 
 class BuscarScreen extends StatefulWidget {
@@ -19,26 +20,36 @@ class _BuscarScreenState extends State<BuscarScreen> {
   List<Incidente> _todos = [];
   bool _loading = true;
   String _query = '';
+  String? _error;
 
   @override
   void initState() {
     super.initState();
+    EventosApp.incidentesCambiaron.addListener(_cargar);
     _cargar();
   }
 
   Future<void> _cargar() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final token = await StorageService.getToken();
       final res = await ApiService.get('/incidentes', token: token);
+      if (!mounted) return;
       if (res.statusCode == 200) {
         setState(() {
-          _todos = (jsonDecode(res.body) as List)
+          _todos = (ApiService.decodificar(res) as List)
               .map((j) => Incidente.fromJson(j))
               .toList();
         });
+      } else {
+        setState(() => _error = 'No se pudieron cargar los incidentes');
       }
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) setState(() => _error = ApiService.mensajeExcepcion(e));
+    }
     if (mounted) setState(() => _loading = false);
   }
 
@@ -54,6 +65,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
 
   @override
   void dispose() {
+    EventosApp.incidentesCambiaron.removeListener(_cargar);
     _queryCtrl.dispose();
     super.dispose();
   }
@@ -74,23 +86,45 @@ class _BuscarScreenState extends State<BuscarScreen> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: _queryCtrl,
-                    onChanged: (v) => setState(() => _query = v),
-                    decoration: const InputDecoration(
+                    onChanged: (v) => setState(() => _query = v.trim()),
+                    decoration: InputDecoration(
                       hintText: 'Buscar por tipo o descripción...',
-                      prefixIcon: Icon(Icons.search, color: AppColors.textMuted),
+                      prefixIcon: const Icon(Icons.search, color: AppColors.textMuted),
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              tooltip: 'Limpiar',
+                              onPressed: () {
+                                _queryCtrl.clear();
+                                setState(() => _query = '');
+                              },
+                            ),
                     ),
                   ),
                 ],
               ),
             ),
             Expanded(
-              child: _loading
+              child: _loading && _todos.isEmpty
                   ? const Center(child: CircularProgressIndicator())
-                  : _resultados.isEmpty
-                      ? const Center(
-                          child: Text('Sin resultados',
-                              style: TextStyle(color: AppColors.textMuted)))
+                  : RefreshIndicator(
+                      onRefresh: _cargar,
+                      child: _error != null
+                      ? MensajeLista(
+                          mensaje: _error!,
+                          icono: Icons.cloud_off_rounded,
+                          onReintentar: _cargar)
+                      : _resultados.isEmpty
+                      ? MensajeLista(
+                          mensaje: _query.isEmpty
+                              ? 'No hay incidentes registrados'
+                              : 'Sin resultados para "$_query"',
+                          icono: Icons.search_off_rounded)
                       : ListView.separated(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
                           padding: const EdgeInsets.all(16),
                           itemCount: _resultados.length,
                           separatorBuilder: (_, _) => const SizedBox(height: 10),
@@ -141,6 +175,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
                             );
                           },
                         ),
+                    ),
             ),
           ],
         ),

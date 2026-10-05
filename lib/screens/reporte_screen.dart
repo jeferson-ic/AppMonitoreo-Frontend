@@ -1,7 +1,7 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../services/api_service.dart';
+import '../services/eventos_app.dart';
 import '../services/storage_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/labeled_field.dart';
@@ -23,30 +23,75 @@ class _ReporteScreenState extends State<ReporteScreen> {
   final _tipoOtroCtrl = TextEditingController();
   List<String> _tipos = [];
   String? _tipoSeleccionado;
-  String _urgencia = 'MEDIO';
   bool _loading = false;
   bool _loadingTipos = true;
+  bool _errorTipos = false;
+
+  Position? _posicion;
+  bool _buscandoUbicacion = false;
+  String? _errorUbicacion;
 
   @override
   void initState() {
     super.initState();
     _cargarTipos();
+    _posicion = widget.posicionInicial;
+    if (_posicion == null) _obtenerUbicacion();
+  }
+
+  void _mostrarMensaje(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _cargarTipos() async {
+    setState(() {
+      _loadingTipos = true;
+      _errorTipos = false;
+    });
     try {
       final token = await StorageService.getToken();
       final res = await ApiService.get('/incidentes/tipos', token: token);
+      if (!mounted) return;
       if (res.statusCode == 200) {
-        final lista = (jsonDecode(res.body) as List).cast<String>();
-        setState(() {
-          _tipos = [...lista, _otro];
-          _tipoSeleccionado = null;
-          _loadingTipos = false;
-        });
+        final lista = (ApiService.decodificar(res) as List).cast<String>();
+        setState(() => _tipos = [...lista, _otro]);
+      } else {
+        setState(() => _errorTipos = true);
       }
     } catch (_) {
-      setState(() => _loadingTipos = false);
+      if (mounted) setState(() => _errorTipos = true);
+    } finally {
+      if (mounted) setState(() => _loadingTipos = false);
+    }
+  }
+
+  Future<void> _obtenerUbicacion() async {
+    setState(() {
+      _buscandoUbicacion = true;
+      _errorUbicacion = null;
+    });
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        _errorUbicacion = 'Activa el GPS del teléfono';
+        return;
+      }
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        _errorUbicacion = 'Permiso de ubicación denegado';
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition()
+          .timeout(const Duration(seconds: 15));
+      _posicion = pos;
+    } catch (_) {
+      _errorUbicacion = 'No se pudo obtener la ubicación';
+    } finally {
+      if (mounted) setState(() => _buscandoUbicacion = false);
     }
   }
 
@@ -62,26 +107,31 @@ class _ReporteScreenState extends State<ReporteScreen> {
   Future<void> _enviar() async {
     if (!_formKey.currentState!.validate()) return;
     final tipo = _tipoAEnviar;
+    final pos = _posicion;
     if (tipo == null) return;
+    if (pos == null) {
+      _mostrarMensaje('Necesitamos tu ubicación para registrar el reporte');
+      return;
+    }
     setState(() => _loading = true);
     try {
       final token = await StorageService.getToken();
-      final pos = widget.posicionInicial;
       final res = await ApiService.post('/incidentes', {
         'tipoIncidente': tipo,
         'descripcion': _descCtrl.text.trim(),
-        'latitud': pos?.latitude ?? 0.0,
-        'longitud': pos?.longitude ?? 0.0,
+        'latitud': pos.latitude,
+        'longitud': pos.longitude,
       }, token: token);
       if (!mounted) return;
       if (res.statusCode == 201) {
         int idIncidente = 0;
         String estado = 'PENDIENTE';
         try {
-          final data = jsonDecode(res.body);
+          final data = ApiService.decodificar(res);
           idIncidente = data['idIncidente'] ?? 0;
           estado = data['estado'] ?? 'PENDIENTE';
         } catch (_) {}
+        EventosApp.notificarIncidentes();
         await Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -92,15 +142,12 @@ class _ReporteScreenState extends State<ReporteScreen> {
             ),
           ),
         );
-      } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: ${res.body}')));
+      } else if (res.statusCode != 401) {
+        _mostrarMensaje(
+            ApiService.mensajeError(res, porDefecto: 'No se pudo enviar el reporte'));
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
+      _mostrarMensaje(ApiService.mensajeExcepcion(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -108,7 +155,6 @@ class _ReporteScreenState extends State<ReporteScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final pos = widget.posicionInicial;
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -141,26 +187,7 @@ class _ReporteScreenState extends State<ReporteScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      LabeledField(
-                        label: 'Tipo de incidente',
-                        child: _loadingTipos
-                            ? const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 14),
-                                child: LinearProgressIndicator(),
-                              )
-                            : DropdownButtonFormField<String>(
-                                initialValue: _tipoSeleccionado,
-                                decoration: const InputDecoration(),
-                                hint: const Text('Selecciona un tipo'),
-                                dropdownColor: AppColors.surface,
-                                items: _tipos
-                                    .map((t) =>
-                                        DropdownMenuItem(value: t, child: Text(t)))
-                                    .toList(),
-                                onChanged: (v) => setState(() => _tipoSeleccionado = v),
-                                validator: (v) => v == null ? 'Selecciona un tipo' : null,
-                              ),
-                      ),
+                      LabeledField(label: 'Tipo de incidente', child: _campoTipo()),
                       if (_tipoSeleccionado == _otro) ...[
                         const SizedBox(height: 12),
                         LabeledField(
@@ -168,6 +195,8 @@ class _ReporteScreenState extends State<ReporteScreen> {
                           child: TextFormField(
                             controller: _tipoOtroCtrl,
                             decoration: const InputDecoration(hintText: 'Ej. Incendio'),
+                            maxLength: 50,
+                            textCapitalization: TextCapitalization.sentences,
                             validator: (v) => (_tipoSeleccionado == _otro &&
                                     (v == null || v.trim().isEmpty))
                                 ? 'Requerido'
@@ -184,54 +213,20 @@ class _ReporteScreenState extends State<ReporteScreen> {
                               hintText: 'Describe brevemente lo que está ocurriendo...'),
                           maxLines: 3,
                           maxLength: 280,
+                          textCapitalization: TextCapitalization.sentences,
                           validator: (v) =>
-                              (v == null || v.isEmpty) ? 'Requerido' : null,
+                              (v == null || v.trim().isEmpty) ? 'Requerido' : null,
                         ),
                       ),
                       const SizedBox(height: 8),
-                      LabeledField(
-                        label: 'Ubicación',
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                          decoration: BoxDecoration(
-                            color: AppColors.surface,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.location_on,
-                                  size: 18, color: AppColors.primaryLight),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  pos != null
-                                      ? '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}'
-                                      : 'Obteniendo ubicación...',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              if (pos != null)
-                                const Padding(
-                                  padding: EdgeInsets.only(left: 6),
-                                  child: Text('GPS✓',
-                                      style: TextStyle(
-                                          color: AppColors.success,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700)),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
+                      LabeledField(label: 'Ubicación', child: _campoUbicacion()),
                       const SizedBox(height: 16),
                       LabeledField(
                         label: 'Fotografía (opcional)',
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
-                          onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Función próximamente disponible'))),
+                          onTap: () =>
+                              _mostrarMensaje('Función próximamente disponible'),
                           child: Container(
                             width: double.infinity,
                             padding: const EdgeInsets.symmetric(vertical: 28),
@@ -253,35 +248,19 @@ class _ReporteScreenState extends State<ReporteScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      LabeledField(
-                        label: 'Nivel de urgencia percibido',
-                        child: Row(
-                          children: [
-                            Expanded(
-                                child: _urgenciaChip('BAJO', 'Bajo', AppColors.riesgoBajo)),
-                            const SizedBox(width: 10),
-                            Expanded(
-                                child: _urgenciaChip(
-                                    'MEDIO', 'Medio', AppColors.riesgoMedio)),
-                            const SizedBox(width: 10),
-                            Expanded(
-                                child:
-                                    _urgenciaChip('ALTO', 'Alto', AppColors.riesgoAlto)),
-                          ],
-                        ),
-                      ),
                       const SizedBox(height: 24),
                       _loading
                           ? const Center(child: CircularProgressIndicator())
                           : SizedBox(
                               width: double.infinity,
                               child: ElevatedButton(
-                                  onPressed: _enviar, child: const Text('Enviar reporte')),
+                                  onPressed: _posicion == null ? null : _enviar,
+                                  child: const Text('Enviar reporte')),
                             ),
                       const SizedBox(height: 10),
                       const Text(
-                        'Tu reporte será revisado por el sistema de validación automática',
+                        'El nivel de riesgo se asigna según el tipo de incidente. '
+                        'Tu reporte será revisado por el sistema de validación automática.',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                       ),
@@ -296,27 +275,79 @@ class _ReporteScreenState extends State<ReporteScreen> {
     );
   }
 
-  Widget _urgenciaChip(String valor, String label, Color color) {
-    final activo = _urgencia == valor;
-    return GestureDetector(
-      onTap: () => setState(() => _urgencia = valor),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: activo ? color.withValues(alpha: 0.15) : AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: activo ? color : AppColors.border, width: activo ? 1.5 : 1),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: TextStyle(
-            color: activo ? color : AppColors.textSecondary,
-            fontWeight: FontWeight.w700,
-            fontSize: 13,
+  Widget _campoTipo() {
+    if (_loadingTipos) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 14),
+        child: LinearProgressIndicator(),
+      );
+    }
+    if (_errorTipos) {
+      return Row(
+        children: [
+          const Expanded(
+            child: Text('No se pudieron cargar los tipos',
+                style: TextStyle(color: AppColors.textMuted)),
           ),
-        ),
+          TextButton.icon(
+            onPressed: _cargarTipos,
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Reintentar'),
+          ),
+        ],
+      );
+    }
+    return DropdownButtonFormField<String>(
+      initialValue: _tipoSeleccionado,
+      decoration: const InputDecoration(),
+      hint: const Text('Selecciona un tipo'),
+      dropdownColor: AppColors.surface,
+      items: _tipos.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+      onChanged: (v) => setState(() => _tipoSeleccionado = v),
+      validator: (v) => v == null ? 'Selecciona un tipo' : null,
+    );
+  }
+
+  Widget _campoUbicacion() {
+    final pos = _posicion;
+    final String texto;
+    if (pos != null) {
+      texto = '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
+    } else if (_buscandoUbicacion) {
+      texto = 'Obteniendo ubicación...';
+    } else {
+      texto = _errorUbicacion ?? 'Ubicación no disponible';
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      constraints: const BoxConstraints(minHeight: 50),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: pos == null && !_buscandoUbicacion
+            ? AppColors.danger
+            : AppColors.border),
+      ),
+      child: Row(
+        children: [
+          Icon(pos != null ? Icons.location_on : Icons.location_off,
+              size: 18,
+              color: pos != null ? AppColors.primaryLight : AppColors.textMuted),
+          const SizedBox(width: 8),
+          Expanded(child: Text(texto, overflow: TextOverflow.ellipsis)),
+          if (pos != null)
+            const Padding(
+              padding: EdgeInsets.only(left: 6),
+              child: Text('GPS✓',
+                  style: TextStyle(
+                      color: AppColors.success, fontSize: 12, fontWeight: FontWeight.w700)),
+            )
+          else if (_buscandoUbicacion)
+            const SizedBox(
+                width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+          else
+            TextButton(onPressed: _obtenerUbicacion, child: const Text('Reintentar')),
+        ],
       ),
     );
   }

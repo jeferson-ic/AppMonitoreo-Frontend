@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'api_service.dart';
 import 'storage_service.dart';
 
 class FirebaseService {
   static bool _initialized = false;
+  static StreamSubscription<String>? _tokenRefreshSub;
 
   static Future<void> init() async {
     if (_initialized) return;
@@ -18,8 +20,21 @@ class FirebaseService {
         await _enviarTokenAlBackend(token);
       }
 
-      FirebaseMessaging.instance.onTokenRefresh.listen(_enviarTokenAlBackend);
+      _tokenRefreshSub = messaging.onTokenRefresh.listen(_enviarTokenAlBackend);
       _initialized = true;
+    } catch (_) {}
+  }
+
+  /// Al cerrar sesión se invalida el token FCM: así el backend deja de
+  /// enviarle push a este dispositivo y el próximo usuario registra uno nuevo.
+  static Future<void> reset() async {
+    await _tokenRefreshSub?.cancel();
+    _tokenRefreshSub = null;
+    _initialized = false;
+    try {
+      await FirebaseMessaging.instance
+          .deleteToken()
+          .timeout(const Duration(seconds: 5));
     } catch (_) {}
   }
 
