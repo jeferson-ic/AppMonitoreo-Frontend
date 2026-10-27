@@ -5,9 +5,9 @@ import 'package:http/http.dart' as http;
 import 'sesion_service.dart';
 
 class ApiService {
-  // Se puede cambiar sin tocar el código:
-  //   flutter run --dart-define=API_URL=http://192.168.1.50:8080
-  // 10.0.2.2 es el "localhost" de la PC visto desde el emulador de Android.
+  // La URL del backend se define al compilar:
+  //   flutter build apk --release --dart-define=API_URL=https://app-incidenciasurbanas-backend.onrender.com
+  // Sin el parámetro se usa el backend local del emulador.
   static const String baseUrl =
       String.fromEnvironment('API_URL', defaultValue: 'http://10.0.2.2:8080');
 

@@ -1,0 +1,49 @@
+name: APK Android
+
+# Se ejecuta al publicar una etiqueta de versión (ej. v1.0.0) o manualmente desde la pestaña Actions.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Preparar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Descargar dependencias
+        run: flutter pub get
+
+      - name: Compilar APK de release
+        env:
+          MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
+        run: flutter build apk --release --dart-define=API_URL=https://app-incidenciasurbanas-backend.onrender.com
+
+      - name: Guardar APK como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Adjuntar APK a la Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/app-release.apk
