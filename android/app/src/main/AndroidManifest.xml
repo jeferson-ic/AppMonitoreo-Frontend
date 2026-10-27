@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
-        android:label="Zonas Peligrosas"
+        android:label="AlertaZona"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 

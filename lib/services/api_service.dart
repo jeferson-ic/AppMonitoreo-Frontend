@@ -2,7 +2,11 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String baseUrl = 'http://10.0.2.2:8080';
+  // La URL del backend se define al compilar:
+  //   flutter build apk --release --dart-define=API_URL=https://app-incidenciasurbanas-backend.onrender.com
+  // Sin el parámetro se usa el backend local del emulador.
+  static const String baseUrl =
+      String.fromEnvironment('API_URL', defaultValue: 'http://10.0.2.2:8080');
 
   // RNF01: el backend debe responder en <3s en condiciones normales; este
   // timeout es solo una red de seguridad para no dejar la UI colgada si el
