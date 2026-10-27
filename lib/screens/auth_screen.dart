@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/firebase_service.dart';
@@ -26,6 +25,35 @@ class _AuthScreenState extends State<AuthScreen> {
   final _passRegCtrl = TextEditingController();
 
   bool _loading = false;
+  bool _verPass = false;
+  bool _verPassReg = false;
+
+  static final _regexCorreo = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+
+  // Mismas reglas que RegisterRequest del backend.
+  static final _regexLetraYNumero = RegExp(r'^(?=.*[A-Za-z])(?=.*[0-9]).+$');
+
+  static String? _validarCorreo(String? v) {
+    final correo = v?.trim() ?? '';
+    if (correo.isEmpty) return 'Requerido';
+    if (!_regexCorreo.hasMatch(correo)) return 'Correo inválido';
+    return null;
+  }
+
+  static String? _validarPassRegistro(String? v) {
+    if (v == null || v.isEmpty) return 'Requerido';
+    if (v.length < 8) return 'Mínimo 8 caracteres';
+    if (v.length > 72) return 'Máximo 72 caracteres';
+    if (!_regexLetraYNumero.hasMatch(v)) return 'Debe incluir letras y números';
+    return null;
+  }
+
+  Widget _botonVer(bool visible, VoidCallback onPressed) => IconButton(
+        icon: Icon(visible ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+            color: AppColors.textMuted, size: 20),
+        tooltip: visible ? 'Ocultar contraseña' : 'Mostrar contraseña',
+        onPressed: onPressed,
+      );
 
   @override
   void dispose() {
@@ -52,7 +80,7 @@ class _AuthScreenState extends State<AuthScreen> {
       });
       if (!mounted) return;
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
+        final data = ApiService.decodificar(res);
         await StorageService.saveSession(
           token: data['token'],
           correo: data['correo'],
@@ -63,11 +91,13 @@ class _AuthScreenState extends State<AuthScreen> {
         if (!mounted) return;
         Navigator.pushReplacement(
             context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+      } else if (res.statusCode == 401) {
+        _mostrarMensaje('Correo o contraseña incorrectos');
       } else {
-        _mostrarMensaje('Credenciales incorrectas');
+        _mostrarMensaje(ApiService.mensajeError(res));
       }
     } catch (e) {
-      _mostrarMensaje('Error de conexión: $e');
+      _mostrarMensaje(ApiService.mensajeExcepcion(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -90,11 +120,11 @@ class _AuthScreenState extends State<AuthScreen> {
           _correoCtrl.text = _correoRegCtrl.text.trim();
         });
       } else {
-        final body = jsonDecode(res.body);
-        _mostrarMensaje(body['mensaje'] ?? body['error'] ?? 'Error en el registro');
+        _mostrarMensaje(
+            ApiService.mensajeError(res, porDefecto: 'No se pudo completar el registro'));
       }
     } catch (e) {
-      _mostrarMensaje('Error de conexión: $e');
+      _mostrarMensaje(ApiService.mensajeExcepcion(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -181,7 +211,9 @@ class _AuthScreenState extends State<AuthScreen> {
               controller: _correoCtrl,
               decoration: const InputDecoration(hintText: 'correo@ejemplo.com'),
               keyboardType: TextInputType.emailAddress,
-              validator: (v) => (v == null || v.isEmpty) ? 'Requerido' : null,
+              autocorrect: false,
+              textInputAction: TextInputAction.next,
+              validator: _validarCorreo,
             ),
           ),
           const SizedBox(height: 14),
@@ -189,8 +221,13 @@ class _AuthScreenState extends State<AuthScreen> {
             label: 'Contraseña',
             child: TextFormField(
               controller: _passCtrl,
-              decoration: const InputDecoration(hintText: '••••••••'),
-              obscureText: true,
+              decoration: InputDecoration(
+                hintText: '••••••••',
+                suffixIcon: _botonVer(_verPass, () => setState(() => _verPass = !_verPass)),
+              ),
+              obscureText: !_verPass,
+              textInputAction: TextInputAction.done,
+              onFieldSubmitted: (_) => _loading ? null : _login(),
               validator: (v) => (v == null || v.isEmpty) ? 'Requerido' : null,
             ),
           ),
@@ -223,7 +260,10 @@ class _AuthScreenState extends State<AuthScreen> {
             child: TextFormField(
               controller: _nombreCtrl,
               decoration: const InputDecoration(hintText: 'Ana García López'),
-              validator: (v) => (v == null || v.isEmpty) ? 'Requerido' : null,
+              textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.next,
+              maxLength: 100,
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null,
             ),
           ),
           const SizedBox(height: 14),
@@ -233,11 +273,9 @@ class _AuthScreenState extends State<AuthScreen> {
               controller: _correoRegCtrl,
               decoration: const InputDecoration(hintText: 'correo@ejemplo.com'),
               keyboardType: TextInputType.emailAddress,
-              validator: (v) {
-                if (v == null || v.isEmpty) return 'Requerido';
-                if (!v.contains('@')) return 'Correo inválido';
-                return null;
-              },
+              autocorrect: false,
+              textInputAction: TextInputAction.next,
+              validator: _validarCorreo,
             ),
           ),
           const SizedBox(height: 14),
@@ -245,9 +283,14 @@ class _AuthScreenState extends State<AuthScreen> {
             label: 'Contraseña',
             child: TextFormField(
               controller: _passRegCtrl,
-              decoration: const InputDecoration(hintText: '••••••••'),
-              obscureText: true,
-              validator: (v) => (v == null || v.length < 6) ? 'Mínimo 6 caracteres' : null,
+              decoration: InputDecoration(
+                hintText: '••••••••',
+                helperText: 'Mínimo 8 caracteres, con letras y números',
+                suffixIcon:
+                    _botonVer(_verPassReg, () => setState(() => _verPassReg = !_verPassReg)),
+              ),
+              obscureText: !_verPassReg,
+              validator: _validarPassRegistro,
             ),
           ),
           const SizedBox(height: 20),

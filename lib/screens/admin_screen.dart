@@ -1,11 +1,13 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../models/incidente.dart';
+import '../models/metricas.dart';
 import '../services/api_service.dart';
+import '../services/eventos_app.dart';
 import '../services/storage_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/fecha_utils.dart';
 import '../widgets/badges.dart';
+import '../widgets/mensaje_lista.dart';
 import 'metrics_screen.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -19,6 +21,8 @@ class _AdminScreenState extends State<AdminScreen> {
   int _validados = 0;
   int _rechazados = 0;
   bool _loading = true;
+  String? _error;
+  final Set<int> _procesando = {};
 
   @override
   void initState() {
@@ -26,42 +30,90 @@ class _AdminScreenState extends State<AdminScreen> {
     _cargar();
   }
 
+  void _mostrarMensaje(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   Future<void> _cargar() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final token = await StorageService.getToken();
       final res =
           await ApiService.get('/admin/incidentes/pendientes', token: token);
-      if (res.statusCode == 200) {
+      if (!mounted) return;
+      if (res.statusCode != 200) {
+        setState(() => _error = 'No se pudieron cargar los reportes pendientes');
+        return;
+      }
+      final pendientes = (ApiService.decodificar(res) as List)
+          .map((j) => Incidente.fromJson(j))
+          .toList()
+        ..sort((a, b) => b.fechaIncidente.compareTo(a.fechaIncidente));
+      setState(() => _pendientes = pendientes);
+
+      // /incidentes excluye RECHAZADO; los totales salen de las métricas.
+      final resMetricas = await ApiService.get('/admin/metricas', token: token);
+      if (!mounted) return;
+      if (resMetricas.statusCode == 200) {
+        final m = Metricas.fromJson(ApiService.decodificar(resMetricas));
         setState(() {
-          _pendientes = (jsonDecode(res.body) as List)
-              .map((j) => Incidente.fromJson(j))
-              .toList();
+          _validados = m.porEstado['VALIDADO'] ?? 0;
+          _rechazados = m.porEstado['RECHAZADO'] ?? 0;
         });
       }
-      final resTodos = await ApiService.get('/incidentes', token: token);
-      if (resTodos.statusCode == 200) {
-        final todos = (jsonDecode(resTodos.body) as List)
-            .map((j) => Incidente.fromJson(j))
-            .toList();
-        setState(() {
-          _validados = todos.where((i) => i.estado == 'VALIDADO').length;
-          _rechazados = todos.where((i) => i.estado == 'RECHAZADO').length;
-        });
-      }
-    } catch (_) {}
-    if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (mounted) setState(() => _error = ApiService.mensajeExcepcion(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _rechazar(Incidente inc) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rechazar reporte'),
+        content: Text('¿Rechazar "${inc.tipoIncidente}"? '
+            'Dejará de mostrarse en el mapa.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            child: const Text('Rechazar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar == true) await _accion(inc.idIncidente, 'rechazar');
   }
 
   Future<void> _accion(int id, String accion) async {
-    final token = await StorageService.getToken();
-    final path = '/admin/incidentes/$id/$accion';
-    final res = await ApiService.put(path, {}, token: token);
-    if (!mounted) return;
-    if (res.statusCode == 200) {
-      _cargar();
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Incidente $id → ${accion.toUpperCase()}')));
+    if (_procesando.contains(id)) return;
+    setState(() => _procesando.add(id));
+    try {
+      final token = await StorageService.getToken();
+      final res =
+          await ApiService.put('/admin/incidentes/$id/$accion', {}, token: token);
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        _mostrarMensaje(accion == 'validar' ? 'Reporte validado' : 'Reporte rechazado');
+        EventosApp.notificarIncidentes();
+        await _cargar();
+      } else if (res.statusCode == 404) {
+        _mostrarMensaje('El reporte ya no existe');
+        await _cargar();
+      } else if (res.statusCode != 401) {
+        _mostrarMensaje(ApiService.mensajeError(res));
+      }
+    } catch (e) {
+      _mostrarMensaje(ApiService.mensajeExcepcion(e));
+    } finally {
+      if (mounted) setState(() => _procesando.remove(id));
     }
   }
 
@@ -130,25 +182,35 @@ class _AdminScreenState extends State<AdminScreen> {
             ),
             const SizedBox(height: 10),
             Expanded(
-              child: _loading
+              child: _loading && _pendientes.isEmpty
                   ? const Center(child: CircularProgressIndicator())
-                  : _pendientes.isEmpty
-                      ? const Center(
-                          child: Text('No hay reportes pendientes',
-                              style: TextStyle(color: AppColors.textMuted)))
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          itemCount: _pendientes.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 10),
-                          itemBuilder: (_, i) {
-                            final inc = _pendientes[i];
-                            return _TarjetaPendiente(
-                              incidente: inc,
-                              onValidar: () => _accion(inc.idIncidente, 'validar'),
-                              onRechazar: () => _accion(inc.idIncidente, 'rechazar'),
-                            );
-                          },
-                        ),
+                  : RefreshIndicator(
+                      onRefresh: _cargar,
+                      child: _error != null
+                          ? MensajeLista(
+                              mensaje: _error!,
+                              icono: Icons.cloud_off_rounded,
+                              onReintentar: _cargar)
+                          : _pendientes.isEmpty
+                              ? const MensajeLista(
+                                  mensaje: 'No hay reportes pendientes',
+                                  icono: Icons.task_alt_rounded)
+                              : ListView.separated(
+                                  physics: const AlwaysScrollableScrollPhysics(),
+                                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                                  itemCount: _pendientes.length,
+                                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                                  itemBuilder: (_, i) {
+                                    final inc = _pendientes[i];
+                                    return _TarjetaPendiente(
+                                      incidente: inc,
+                                      procesando: _procesando.contains(inc.idIncidente),
+                                      onValidar: () => _accion(inc.idIncidente, 'validar'),
+                                      onRechazar: () => _rechazar(inc),
+                                    );
+                                  },
+                                ),
+                    ),
             ),
           ],
         ),
@@ -178,10 +240,12 @@ class _AdminScreenState extends State<AdminScreen> {
 
 class _TarjetaPendiente extends StatelessWidget {
   final Incidente incidente;
+  final bool procesando;
   final VoidCallback onValidar;
   final VoidCallback onRechazar;
   const _TarjetaPendiente({
     required this.incidente,
+    required this.procesando,
     required this.onValidar,
     required this.onRechazar,
   });
@@ -216,36 +280,42 @@ class _TarjetaPendiente extends StatelessWidget {
               style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
           const SizedBox(height: 8),
           Text(
-            '${formatearFecha(incidente.fechaIncidente)} · ${incidente.reportesCoincidentes} reportes',
+            '${formatearFechaHora(incidente.fechaIncidente)} · Riesgo ${incidente.nivelRiesgo.toLowerCase()}',
             style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
           ),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: onRechazar,
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(40),
-                    foregroundColor: AppColors.danger,
-                    side: const BorderSide(color: AppColors.danger),
+          if (procesando)
+            const SizedBox(
+              height: 40,
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: onRechazar,
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(40),
+                      foregroundColor: AppColors.danger,
+                      side: const BorderSide(color: AppColors.danger),
+                    ),
+                    child: const Text('Rechazar'),
                   ),
-                  child: const Text('Rechazar'),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: onValidar,
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(40),
-                    backgroundColor: AppColors.success,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: onValidar,
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(40),
+                      backgroundColor: AppColors.success,
+                    ),
+                    child: const Text('Validar'),
                   ),
-                  child: const Text('Validar'),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
     );

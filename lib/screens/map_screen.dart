@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -7,6 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
 import '../models/incidente.dart';
 import '../services/api_service.dart';
+import '../services/eventos_app.dart';
 import '../services/storage_service.dart';
 import '../theme/app_theme.dart';
 import 'incidente_detalle_screen.dart';
@@ -39,57 +39,83 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
+    EventosApp.incidentesCambiaron.addListener(_cargarIncidentes);
     _initNotificaciones();
+    _cargarIncidentes();
     _obtenerUbicacion();
   }
 
+  void _mostrarMensaje(String msg, {VoidCallback? onReintentar}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      action: onReintentar == null
+          ? null
+          : SnackBarAction(label: 'Reintentar', onPressed: onReintentar),
+    ));
+  }
+
   Future<void> _initNotificaciones() async {
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-    await _notifPlugin.initialize(
-      settings: const InitializationSettings(android: androidSettings),
-    );
-    const channel = AndroidNotificationChannel(
-      'zonas_peligrosas', 'Alertas de zonas peligrosas',
-      importance: Importance.high,
-    );
-    await _notifPlugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
+    try {
+      const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+      await _notifPlugin.initialize(
+        settings: const InitializationSettings(android: androidSettings),
+      );
+      const channel = AndroidNotificationChannel(
+        'zonas_peligrosas', 'Alertas de zonas peligrosas',
+        importance: Importance.high,
+      );
+      await _notifPlugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(channel);
+    } catch (_) {}
   }
 
   Future<void> _obtenerUbicacion() async {
-    LocationPermission perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
-    }
-    if (perm == LocationPermission.deniedForever) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Permiso de ubicación denegado')));
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        _mostrarMensaje('Activa el GPS para ver alertas cercanas',
+            onReintentar: _obtenerUbicacion);
+        return;
       }
-      return;
-    }
-    final pos = await Geolocator.getCurrentPosition();
-    setState(() => _posicion = pos);
-    _mapController?.animateCamera(
-        CameraUpdate.newLatLng(LatLng(pos.latitude, pos.longitude)));
-    await _cargarIncidentes();
-    await _verificarAlerta(pos);
-    _iniciarSeguimientoUbicacion();
-  }
-
-  void _iniciarSeguimientoUbicacion() {
-    // RNF06: reacciona a cada cambio de ubicación relevante (no a cada
-    // micro-jitter del GPS) en vez de refrescar con un timer fijo.
-    const settings = LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 25);
-    _posicionSub = Geolocator.getPositionStream(locationSettings: settings)
-        .listen((pos) async {
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        _mostrarMensaje('Sin permiso de ubicación no podemos alertarte de zonas cercanas');
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition()
+          .timeout(const Duration(seconds: 15));
+      if (!mounted) return;
       setState(() => _posicion = pos);
       _mapController?.animateCamera(
           CameraUpdate.newLatLng(LatLng(pos.latitude, pos.longitude)));
       await _verificarAlerta(pos);
-    });
+      _iniciarSeguimientoUbicacion();
+    } catch (_) {
+      _mostrarMensaje('No se pudo obtener tu ubicación', onReintentar: _obtenerUbicacion);
+    }
+  }
+
+  void _iniciarSeguimientoUbicacion() {
+    _posicionSub?.cancel();
+    // RNF06: reacciona a cada cambio de ubicación relevante (no a cada
+    // micro-jitter del GPS) en vez de refrescar con un timer fijo.
+    const settings = LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 25);
+    _posicionSub = Geolocator.getPositionStream(locationSettings: settings).listen(
+      (pos) async {
+        if (!mounted) return;
+        setState(() => _posicion = pos);
+        _mapController?.animateCamera(
+            CameraUpdate.newLatLng(LatLng(pos.latitude, pos.longitude)));
+        await _verificarAlerta(pos);
+      },
+      onError: (_) {},
+    );
   }
 
   Future<void> _cargarIncidentes() async {
@@ -104,14 +130,20 @@ class _MapScreenState extends State<MapScreen> {
             };
       final res =
           await ApiService.get('/incidentes', token: token, queryParams: queryParams);
+      if (!mounted) return;
       if (res.statusCode == 200) {
-        final lista = (jsonDecode(res.body) as List)
+        final lista = (ApiService.decodificar(res) as List)
             .map((j) => Incidente.fromJson(j))
             .toList();
         setState(() => _incidentes = lista);
         await _cargarZonasRiesgo();
+      } else if (res.statusCode != 401) {
+        _mostrarMensaje('No se pudieron cargar los incidentes',
+            onReintentar: _cargarIncidentes);
       }
-    } catch (_) {}
+    } catch (e) {
+      _mostrarMensaje(ApiService.mensajeExcepcion(e), onReintentar: _cargarIncidentes);
+    }
   }
 
   Future<void> _seleccionarRangoFechas() async {
@@ -161,8 +193,8 @@ class _MapScreenState extends State<MapScreen> {
     try {
       final token = await StorageService.getToken();
       final res = await ApiService.get('/incidentes/zonas-riesgo', token: token);
-      if (res.statusCode == 200) {
-        final zonas = jsonDecode(res.body) as List;
+      if (res.statusCode == 200 && mounted) {
+        final zonas = ApiService.decodificar(res) as List;
         setState(() {
           _zonasCercles = zonas.map((z) {
             final lat = (z['celda_lat'] as num).toDouble();
@@ -193,7 +225,7 @@ class _MapScreenState extends State<MapScreen> {
             'radioMetros': _radioAlertaMetros.toString(),
           });
       if (res.statusCode != 200) return;
-      final data = jsonDecode(res.body);
+      final data = ApiService.decodificar(res);
       if (data['enZonaDeRiesgo'] != true) return;
       final detalle = (data['detalle'] as List? ?? [])
           .map((j) => Incidente.fromJson(j))
@@ -220,6 +252,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
+    EventosApp.incidentesCambiaron.removeListener(_cargarIncidentes);
     _posicionSub?.cancel();
     _mapController?.dispose();
     super.dispose();
@@ -265,18 +298,16 @@ class _MapScreenState extends State<MapScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppColors.primary,
-        onPressed: () async {
-          final resultado = await Navigator.push<bool>(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ReporteScreen(
-                posicionInicial: _posicion,
-                onVerReportes: () => widget.onNavegarTab?.call(2),
-              ),
+        // Al enviar un reporte, EventosApp avisa y el mapa se recarga solo.
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ReporteScreen(
+              posicionInicial: _posicion,
+              onVerReportes: () => widget.onNavegarTab?.call(2),
             ),
-          );
-          if (resultado == true) _cargarIncidentes();
-        },
+          ),
+        ),
         icon: const Icon(Icons.add),
         label: const Text('Reportar incidente'),
       ),
@@ -294,7 +325,7 @@ class _MapScreenState extends State<MapScreen> {
               children: [
                 Text('AlertaZona',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-                Text('Ciudad de México · Hoy',
+                Text('Lima · Incidentes reportados',
                     style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
               ],
             ),

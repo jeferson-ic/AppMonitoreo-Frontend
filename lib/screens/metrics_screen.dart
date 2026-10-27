@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../models/incidente.dart';
 import '../models/metricas.dart';
@@ -30,10 +29,10 @@ class _MetricsScreenState extends State<MetricsScreen> {
       final resMetricas = await ApiService.get('/admin/metricas', token: token);
       final resIncidentes = await ApiService.get('/incidentes', token: token);
       if (resMetricas.statusCode == 200) {
-        _metricas = Metricas.fromJson(jsonDecode(resMetricas.body));
+        _metricas = Metricas.fromJson(ApiService.decodificar(resMetricas));
       }
       if (resIncidentes.statusCode == 200) {
-        _todos = (jsonDecode(resIncidentes.body) as List)
+        _todos = (ApiService.decodificar(resIncidentes) as List)
             .map((j) => Incidente.fromJson(j))
             .toList();
       }
