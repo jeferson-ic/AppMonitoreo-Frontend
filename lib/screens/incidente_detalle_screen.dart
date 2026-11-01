@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/incidente.dart';
 import '../theme/app_theme.dart';
 import '../utils/fecha_utils.dart';
@@ -15,7 +16,7 @@ class IncidenteDetalleScreen extends StatefulWidget {
 }
 
 class _IncidenteDetalleScreenState extends State<IncidenteDetalleScreen> {
-  String get _codigo => 'INC-${widget.incidente.idIncidente.toString().padLeft(3, '0')}';
+  String get _codigo => widget.incidente.codigo;
 
   String get _fechaFormateada => formatearFechaHora(widget.incidente.fechaIncidente);
 
@@ -26,6 +27,22 @@ class _IncidenteDetalleScreenState extends State<IncidenteDetalleScreen> {
     Clipboard.setData(ClipboardData(text: texto));
     ScaffoldMessenger.of(context)
         .showSnackBar(const SnackBar(content: Text('Copiado al portapapeles')));
+  }
+
+  Future<void> _abrirEnMapas() async {
+    final inc = widget.incidente;
+    final url = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=${inc.latitud},${inc.longitud}');
+    bool abierto;
+    try {
+      abierto = await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      abierto = false;
+    }
+    if (!abierto && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('No se pudo abrir Google Maps')));
+    }
   }
 
   @override
@@ -68,27 +85,30 @@ class _IncidenteDetalleScreenState extends State<IncidenteDetalleScreen> {
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(16),
-                    child: SizedBox(
-                      height: 160,
-                      child: IgnorePointer(
-                        child: GoogleMap(
-                          initialCameraPosition:
-                              CameraPosition(target: posicion, zoom: 15),
-                          markers: {
-                            Marker(
-                              markerId: const MarkerId('detalle'),
-                              position: posicion,
-                              icon: BitmapDescriptor.defaultMarkerWithHue(
-                                switch (inc.nivelRiesgo.toUpperCase()) {
-                                  'ALTO' => BitmapDescriptor.hueRed,
-                                  'MEDIO' => BitmapDescriptor.hueOrange,
-                                  _ => BitmapDescriptor.hueAzure,
-                                },
+                    child: GestureDetector(
+                      onTap: _abrirEnMapas,
+                      child: SizedBox(
+                        height: 160,
+                        child: IgnorePointer(
+                          child: GoogleMap(
+                            initialCameraPosition:
+                                CameraPosition(target: posicion, zoom: 15),
+                            markers: {
+                              Marker(
+                                markerId: const MarkerId('detalle'),
+                                position: posicion,
+                                icon: BitmapDescriptor.defaultMarkerWithHue(
+                                  switch (inc.nivelRiesgo.toUpperCase()) {
+                                    'ALTO' => BitmapDescriptor.hueRed,
+                                    'MEDIO' => BitmapDescriptor.hueOrange,
+                                    _ => BitmapDescriptor.hueAzure,
+                                  },
+                                ),
                               ),
-                            ),
-                          },
-                          liteModeEnabled: true,
-                          zoomControlsEnabled: false,
+                            },
+                            liteModeEnabled: true,
+                            zoomControlsEnabled: false,
+                          ),
                         ),
                       ),
                     ),
@@ -143,6 +163,15 @@ class _IncidenteDetalleScreenState extends State<IncidenteDetalleScreen> {
                     ]),
                   ),
                   const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _abrirEnMapas,
+                      icon: const Icon(Icons.map_outlined, size: 18),
+                      label: const Text('Abrir en Google Maps'),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(

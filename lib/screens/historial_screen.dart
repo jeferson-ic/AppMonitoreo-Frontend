@@ -8,6 +8,7 @@ import '../utils/fecha_utils.dart';
 import '../widgets/badges.dart';
 import '../widgets/mensaje_lista.dart';
 import 'incidente_detalle_screen.dart';
+import 'reporte_screen.dart';
 
 class HistorialScreen extends StatefulWidget {
   const HistorialScreen({super.key});
@@ -49,12 +50,21 @@ class _HistorialScreenState extends State<HistorialScreen> {
               .toList();
         });
       } else {
-        setState(() => _error = 'No se pudieron cargar tus reportes');
+        _mostrarError('No se pudieron cargar tus reportes');
       }
     } catch (e) {
-      if (mounted) setState(() => _error = ApiService.mensajeExcepcion(e));
+      if (mounted) _mostrarError(ApiService.mensajeExcepcion(e));
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  // Si ya hay reportes en pantalla se conservan y solo se avisa del fallo.
+  void _mostrarError(String msg) {
+    if (_reportes.isEmpty) {
+      setState(() => _error = msg);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
   }
 
   @override
@@ -71,7 +81,10 @@ class _HistorialScreenState extends State<HistorialScreen> {
                     child: Text('Mis reportes',
                         style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                   ),
-                  IconButton(icon: const Icon(Icons.refresh), onPressed: _cargar),
+                  IconButton(
+                      icon: const Icon(Icons.refresh),
+                      tooltip: 'Actualizar',
+                      onPressed: _loading ? null : _cargar),
                 ],
               ),
             ),
@@ -86,9 +99,13 @@ class _HistorialScreenState extends State<HistorialScreen> {
                           icono: Icons.cloud_off_rounded,
                           onReintentar: _cargar)
                       : _reportes.isEmpty
-                      ? const MensajeLista(
-                          mensaje: 'Aún no tienes reportes.\n'
-                              'Usa "Reportar incidente" en el mapa para crear uno.')
+                      ? MensajeLista(
+                          mensaje: 'Aún no tienes reportes.',
+                          textoAccion: 'Reportar incidente',
+                          iconoAccion: Icons.add,
+                          onReintentar: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const ReporteScreen())))
                       : ListView.separated(
                           physics: const AlwaysScrollableScrollPhysics(),
                           padding: const EdgeInsets.all(16),
@@ -164,7 +181,7 @@ class _TarjetaReporte extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            EstadoBadge(estado: incidente.estado, dot: false),
+            EstadoBadge(estado: incidente.estado, dot: false, compacto: true),
           ],
         ),
       ),

@@ -7,12 +7,16 @@ class MensajeLista extends StatelessWidget {
   final String mensaje;
   final IconData icono;
   final VoidCallback? onReintentar;
+  final String textoAccion;
+  final IconData iconoAccion;
 
   const MensajeLista({
     super.key,
     required this.mensaje,
     this.icono = Icons.inbox_outlined,
     this.onReintentar,
+    this.textoAccion = 'Reintentar',
+    this.iconoAccion = Icons.refresh,
   });
 
   @override
@@ -31,8 +35,8 @@ class MensajeLista extends StatelessWidget {
           Center(
             child: OutlinedButton.icon(
               onPressed: onReintentar,
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('Reintentar'),
+              icon: Icon(iconoAccion, size: 18),
+              label: Text(textoAccion),
             ),
           ),
         ],

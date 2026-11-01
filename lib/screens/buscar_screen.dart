@@ -20,6 +20,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
   List<Incidente> _todos = [];
   bool _loading = true;
   String _query = '';
+  String _filtroRiesgo = 'TODOS';
   String? _error;
 
   @override
@@ -45,22 +46,46 @@ class _BuscarScreenState extends State<BuscarScreen> {
               .toList();
         });
       } else {
-        setState(() => _error = 'No se pudieron cargar los incidentes');
+        _mostrarError('No se pudieron cargar los incidentes');
       }
     } catch (e) {
-      if (mounted) setState(() => _error = ApiService.mensajeExcepcion(e));
+      if (mounted) _mostrarError(ApiService.mensajeExcepcion(e));
     }
     if (mounted) setState(() => _loading = false);
   }
 
+  // Si ya hay incidentes en pantalla se conservan y solo se avisa del fallo.
+  void _mostrarError(String msg) {
+    if (_todos.isEmpty) {
+      setState(() => _error = msg);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
   List<Incidente> get _resultados {
-    if (_query.isEmpty) return _todos;
     final q = _query.toLowerCase();
     return _todos
         .where((i) =>
-            i.tipoIncidente.toLowerCase().contains(q) ||
-            i.descripcion.toLowerCase().contains(q))
+            (_filtroRiesgo == 'TODOS' || i.nivelRiesgo.toUpperCase() == _filtroRiesgo) &&
+            (q.isEmpty ||
+                i.tipoIncidente.toLowerCase().contains(q) ||
+                i.descripcion.toLowerCase().contains(q)))
         .toList();
+  }
+
+  Widget _chipRiesgo(String valor, String label) {
+    final activo = _filtroRiesgo == valor;
+    return ChoiceChip(
+      label: Text(label),
+      selected: activo,
+      onSelected: (_) => setState(() => _filtroRiesgo = valor),
+      selectedColor: AppColors.primary,
+      labelStyle: TextStyle(
+        color: activo ? Colors.white : AppColors.textSecondary,
+        fontWeight: FontWeight.w600,
+      ),
+    );
   }
 
   @override
@@ -102,6 +127,16 @@ class _BuscarScreenState extends State<BuscarScreen> {
                             ),
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      _chipRiesgo('TODOS', 'Todos'),
+                      _chipRiesgo('ALTO', 'Alto'),
+                      _chipRiesgo('MEDIO', 'Medio'),
+                      _chipRiesgo('BAJO', 'Bajo'),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -117,9 +152,11 @@ class _BuscarScreenState extends State<BuscarScreen> {
                           onReintentar: _cargar)
                       : _resultados.isEmpty
                       ? MensajeLista(
-                          mensaje: _query.isEmpty
+                          mensaje: _todos.isEmpty
                               ? 'No hay incidentes registrados'
-                              : 'Sin resultados para "$_query"',
+                              : _query.isEmpty
+                                  ? 'No hay incidentes con ese nivel de riesgo'
+                                  : 'Sin resultados para "$_query"',
                           icono: Icons.search_off_rounded)
                       : ListView.separated(
                           physics: const AlwaysScrollableScrollPhysics(),
@@ -166,9 +203,22 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                         ],
                                       ),
                                     ),
-                                    Text(formatearFecha(inc.fechaIncidente),
-                                        style: const TextStyle(
-                                            color: AppColors.textMuted, fontSize: 11)),
+                                    const SizedBox(width: 8),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                            'Riesgo ${AppColors.riesgoLabel(inc.nivelRiesgo).toLowerCase()}',
+                                            style: TextStyle(
+                                                color: AppColors.riesgoColor(inc.nivelRiesgo),
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700)),
+                                        const SizedBox(height: 2),
+                                        Text(formatearFecha(inc.fechaIncidente),
+                                            style: const TextStyle(
+                                                color: AppColors.textMuted, fontSize: 11)),
+                                      ],
+                                    ),
                                   ],
                                 ),
                               ),

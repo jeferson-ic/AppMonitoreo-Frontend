@@ -9,6 +9,8 @@ import '../services/api_service.dart';
 import '../services/eventos_app.dart';
 import '../services/storage_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/fecha_utils.dart';
+import '../widgets/badges.dart';
 import 'incidente_detalle_screen.dart';
 import 'reporte_screen.dart';
 
@@ -31,6 +33,7 @@ class _MapScreenState extends State<MapScreen> {
   String _filtroRiesgo = 'TODOS';
   String? _filtroTipo;
   DateTimeRange? _filtroFechas;
+  bool _cargando = false;
 
   // RNF07: el backend evalúa proximidad con radio de 150m; se usa un radio
   // algo mayor en la app para alertar con margen antes de entrar a la zona.
@@ -45,13 +48,14 @@ class _MapScreenState extends State<MapScreen> {
     _obtenerUbicacion();
   }
 
-  void _mostrarMensaje(String msg, {VoidCallback? onReintentar}) {
+  void _mostrarMensaje(String msg,
+      {VoidCallback? onReintentar, String etiquetaAccion = 'Reintentar'}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
       action: onReintentar == null
           ? null
-          : SnackBarAction(label: 'Reintentar', onPressed: onReintentar),
+          : SnackBarAction(label: etiquetaAccion, onPressed: onReintentar),
     ));
   }
 
@@ -83,9 +87,15 @@ class _MapScreenState extends State<MapScreen> {
       if (perm == LocationPermission.denied) {
         perm = await Geolocator.requestPermission();
       }
-      if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) {
-        _mostrarMensaje('Sin permiso de ubicación no podemos alertarte de zonas cercanas');
+      if (perm == LocationPermission.deniedForever) {
+        // Android ya no vuelve a preguntar: solo se puede activar en Ajustes.
+        _mostrarMensaje('Activa el permiso de ubicación en Ajustes para recibir alertas',
+            etiquetaAccion: 'Ajustes', onReintentar: Geolocator.openAppSettings);
+        return;
+      }
+      if (perm == LocationPermission.denied) {
+        _mostrarMensaje('Sin permiso de ubicación no podemos alertarte de zonas cercanas',
+            onReintentar: _obtenerUbicacion);
         return;
       }
       final pos = await Geolocator.getCurrentPosition()
@@ -119,6 +129,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _cargarIncidentes() async {
+    if (mounted) setState(() => _cargando = true);
     try {
       final token = await StorageService.getToken();
       final rango = _filtroFechas;
@@ -143,6 +154,8 @@ class _MapScreenState extends State<MapScreen> {
       }
     } catch (e) {
       _mostrarMensaje(ApiService.mensajeExcepcion(e), onReintentar: _cargarIncidentes);
+    } finally {
+      if (mounted) setState(() => _cargando = false);
     }
   }
 
@@ -164,6 +177,69 @@ class _MapScreenState extends State<MapScreen> {
     _cargarIncidentes();
   }
 
+  bool get _hayFiltros =>
+      _filtroRiesgo != 'TODOS' || _filtroTipo != null || _filtroFechas != null;
+
+  void _limpiarFiltros() {
+    final recargar = _filtroFechas != null;
+    setState(() {
+      _filtroRiesgo = 'TODOS';
+      _filtroTipo = null;
+      _filtroFechas = null;
+    });
+    if (recargar) _cargarIncidentes();
+  }
+
+  void _mostrarResumen(Incidente inc) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(inc.tipoIncidente,
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  ),
+                  RiesgoBadge(nivel: inc.nivelRiesgo),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text('${inc.codigo} · ${formatearFechaHora(inc.fechaIncidente)}',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+              const SizedBox(height: 12),
+              Text(inc.descripcion,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppColors.textSecondary, height: 1.4)),
+              const SizedBox(height: 12),
+              EstadoBadge(estado: inc.estado),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => IncidenteDetalleScreen(incidente: inc)),
+                  );
+                },
+                child: const Text('Ver detalle'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   List<Incidente> get _incidentesFiltrados => _incidentes.where((i) {
         final pasaRiesgo = _filtroRiesgo == 'TODOS' || i.nivelRiesgo == _filtroRiesgo;
         final pasaTipo = _filtroTipo == null || i.tipoIncidente == _filtroTipo;
@@ -182,10 +258,7 @@ class _MapScreenState extends State<MapScreen> {
       markerId: MarkerId(inc.idIncidente.toString()),
       position: LatLng(inc.latitud, inc.longitud),
       icon: BitmapDescriptor.defaultMarkerWithHue(hue),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => IncidenteDetalleScreen(incidente: inc)),
-      ),
+      onTap: () => _mostrarResumen(inc),
     );
   }
 
@@ -283,11 +356,30 @@ class _MapScreenState extends State<MapScreen> {
                         onMapCreated: (c) => _mapController = c,
                         myLocationEnabled: true,
                         myLocationButtonEnabled: true,
+                        // El botón "Reportar incidente" taparía los controles
+                        // de zoom; se hace zoom con dos dedos.
+                        zoomControlsEnabled: false,
+                        mapToolbarEnabled: false,
                         markers: _marcadores,
                         circles: _zonasCercles,
                       ),
-                      Positioned(top: 12, right: 12, child: _buildContador()),
-                      Positioned(bottom: 12, left: 12, child: _buildLeyenda()),
+                      if (_cargando)
+                        const Positioned(
+                            top: 0, left: 0, right: 0, child: LinearProgressIndicator()),
+                      // Arriba a la izquierda: arriba a la derecha está el botón
+                      // "Mi ubicación" y abajo a la izquierda el logo de Google.
+                      Positioned(
+                        top: 12,
+                        left: 12,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildContador(),
+                            const SizedBox(height: 8),
+                            _buildLeyenda(),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -325,7 +417,7 @@ class _MapScreenState extends State<MapScreen> {
               children: [
                 Text('AlertaZona',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-                Text('Lima · Incidentes reportados',
+                Text('Incidentes reportados',
                     style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
               ],
             ),
@@ -368,8 +460,13 @@ class _MapScreenState extends State<MapScreen> {
               ...tipos.map((t) => PopupMenuItem(value: t, child: Text(t))),
             ],
             child: Chip(
-              label: Text(_filtroTipo ?? 'Tipo'),
-              avatar: const Icon(Icons.filter_list, size: 16),
+              label: Text(_filtroTipo ?? 'Tipo',
+                  style: TextStyle(
+                      color: _filtroTipo != null ? Colors.white : null,
+                      fontWeight: _filtroTipo != null ? FontWeight.w600 : null)),
+              avatar: Icon(Icons.filter_list,
+                  size: 16, color: _filtroTipo != null ? Colors.white : null),
+              backgroundColor: _filtroTipo != null ? AppColors.primary : null,
             ),
           ),
           const SizedBox(width: 8),
@@ -381,6 +478,14 @@ class _MapScreenState extends State<MapScreen> {
             onPressed: _seleccionarRangoFechas,
             onDeleted: _filtroFechas == null ? null : _limpiarFiltroFechas,
           ),
+          if (_hayFiltros) ...[
+            const SizedBox(width: 8),
+            ActionChip(
+              label: const Text('Limpiar filtros'),
+              avatar: const Icon(Icons.filter_alt_off_outlined, size: 16),
+              onPressed: _limpiarFiltros,
+            ),
+          ],
         ],
       ),
     );
@@ -436,6 +541,22 @@ class _MapScreenState extends State<MapScreen> {
           _leyendaFila(AppColors.riesgoMedio, 'Riesgo Medio'),
           const SizedBox(height: 4),
           _leyendaFila(AppColors.riesgoBajo, 'Riesgo Bajo'),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.25),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.red),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Text('Zona de riesgo', style: TextStyle(fontSize: 11)),
+            ],
+          ),
         ],
       ),
     );

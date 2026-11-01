@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart' as firebase_core;
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
 import 'services/firebase_service.dart' as app_firebase;
 import 'services/sesion_service.dart';
 import 'services/storage_service.dart';
 import 'theme/app_theme.dart';
+import 'widgets/logo_app.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,6 +32,10 @@ class AppMonitoreo extends StatelessWidget {
       theme: AppTheme.dark,
       darkTheme: AppTheme.dark,
       themeMode: ThemeMode.dark,
+      // Selectores de fecha, diálogos y tooltips del framework en español.
+      locale: const Locale('es'),
+      supportedLocales: const [Locale('es')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       home: const SplashRouter(),
     );
   }
@@ -68,7 +74,16 @@ class _SplashRouterState extends State<SplashRouter> {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      body: Center(child: CircularProgressIndicator()),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LogoApp(),
+            SizedBox(height: 32),
+            CircularProgressIndicator(),
+          ],
+        ),
+      ),
     );
   }
 }

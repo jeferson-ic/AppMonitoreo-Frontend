@@ -21,6 +21,11 @@ class Incidente {
     this.reportesCoincidentes = 1,
   });
 
+  /// Código de seguimiento que ve el usuario; el mismo en toda la app.
+  static String codigoDe(int id) => 'INC-${id.toString().padLeft(4, '0')}';
+
+  String get codigo => codigoDe(idIncidente);
+
   factory Incidente.fromJson(Map<String, dynamic> j) => Incidente(
         idIncidente: j['idIncidente'] ?? 0,
         tipoIncidente: j['tipoIncidente'] ?? '',

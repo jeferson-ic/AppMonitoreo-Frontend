@@ -13,7 +13,8 @@ class AppColors {
 
   static const textPrimary = Color(0xFFF8FAFC);
   static const textSecondary = Color(0xFF94A3B8);
-  static const textMuted = Color(0xFF64748B);
+  // Aclarado para llegar a contraste 4.5:1 sobre background y surface.
+  static const textMuted = Color(0xFF7C8BA1);
 
   static const riesgoAlto = Color(0xFFEF4444);
   static const riesgoMedio = Color(0xFFF59E0B);
@@ -42,6 +43,12 @@ class AppColors {
         'RECHAZADO' => 'Rechazado',
         'ELIMINADO' => 'Eliminado',
         _ => 'Pendiente de revisión',
+      };
+
+  static String riesgoLabel(String nivel) => switch (nivel.toUpperCase()) {
+        'ALTO' => 'Alto',
+        'MEDIO' => 'Medio',
+        _ => 'Bajo',
       };
 }
 

@@ -31,7 +31,10 @@ class RiesgoBadge extends StatelessWidget {
 class EstadoBadge extends StatelessWidget {
   final String estado;
   final bool dot;
-  const EstadoBadge({super.key, required this.estado, this.dot = true});
+  // Etiqueta corta ("Pendiente") para tarjetas con poco espacio.
+  final bool compacto;
+  const EstadoBadge(
+      {super.key, required this.estado, this.dot = true, this.compacto = false});
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +57,9 @@ class EstadoBadge extends StatelessWidget {
             const SizedBox(width: 6),
           ],
           Text(
-            AppColors.estadoLabel(estado),
+            compacto && estado.toUpperCase() == 'PENDIENTE'
+                ? 'Pendiente'
+                : AppColors.estadoLabel(estado),
             style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
           ),
         ],

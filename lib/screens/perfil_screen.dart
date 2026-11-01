@@ -42,7 +42,11 @@ class _PerfilScreenState extends State<PerfilScreen> {
         content: const Text('¿Seguro que quieres salir de tu cuenta?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Salir')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            child: const Text('Salir'),
+          ),
         ],
       ),
     );
@@ -145,6 +149,21 @@ class _PerfilScreenState extends State<PerfilScreen> {
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.6)),
+            const SizedBox(height: 10),
+            _opcion(
+              icon: Icons.info_outline,
+              color: AppColors.textSecondary,
+              label: 'Acerca de AlertaZona',
+              onTap: () => showAboutDialog(
+                context: context,
+                applicationName: 'AlertaZona',
+                applicationIcon: const Icon(Icons.layers_rounded, color: AppColors.primary),
+                children: const [
+                  Text('Sistema de alertas civiles para reportar incidentes y '
+                      'recibir avisos al acercarte a zonas de riesgo.'),
+                ],
+              ),
+            ),
             const SizedBox(height: 10),
             _opcion(
               icon: Icons.logout,

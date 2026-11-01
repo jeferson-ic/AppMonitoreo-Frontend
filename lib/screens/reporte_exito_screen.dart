@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/incidente.dart';
 import '../theme/app_theme.dart';
 
 class ReporteExitoScreen extends StatelessWidget {
@@ -15,11 +16,7 @@ class ReporteExitoScreen extends StatelessWidget {
 
   bool get _yaValidado => estado.toUpperCase() == 'VALIDADO';
 
-  String get _codigoSeguimiento {
-    final anio = DateTime.now().year;
-    final numero = idIncidente.toString().padLeft(4, '0');
-    return 'INC-$anio-$numero';
-  }
+  String get _codigoSeguimiento => Incidente.codigoDe(idIncidente);
 
   @override
   Widget build(BuildContext context) {
