@@ -8,6 +8,7 @@ import '../theme/app_theme.dart';
 import '../utils/fecha_utils.dart';
 import '../widgets/badges.dart';
 import '../widgets/mensaje_lista.dart';
+import 'incidente_detalle_screen.dart';
 import 'metrics_screen.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -18,8 +19,10 @@ class AdminScreen extends StatefulWidget {
 
 class _AdminScreenState extends State<AdminScreen> {
   List<Incidente> _pendientes = [];
-  int _validados = 0;
-  int _rechazados = 0;
+  // null hasta que llegan las métricas, para no mostrar un 0 engañoso.
+  int? _validados;
+  int? _rechazados;
+  bool _pendientesCargados = false;
   bool _loading = true;
   String? _error;
   final Set<int> _procesando = {};
@@ -53,7 +56,10 @@ class _AdminScreenState extends State<AdminScreen> {
           .map((j) => Incidente.fromJson(j))
           .toList()
         ..sort((a, b) => b.fechaIncidente.compareTo(a.fechaIncidente));
-      setState(() => _pendientes = pendientes);
+      setState(() {
+        _pendientes = pendientes;
+        _pendientesCargados = true;
+      });
 
       // /incidentes excluye RECHAZADO; los totales salen de las métricas.
       final resMetricas = await ApiService.get('/admin/metricas', token: token);
@@ -159,7 +165,8 @@ class _AdminScreenState extends State<AdminScreen> {
               child: Row(
                 children: [
                   Expanded(
-                      child: _statCard('Pendientes', _pendientes.length, AppColors.warning)),
+                      child: _statCard('Pendientes',
+                          _pendientesCargados ? _pendientes.length : null, AppColors.warning)),
                   const SizedBox(width: 10),
                   Expanded(child: _statCard('Validados', _validados, AppColors.success)),
                   const SizedBox(width: 10),
@@ -207,6 +214,12 @@ class _AdminScreenState extends State<AdminScreen> {
                                       procesando: _procesando.contains(inc.idIncidente),
                                       onValidar: () => _accion(inc.idIncidente, 'validar'),
                                       onRechazar: () => _rechazar(inc),
+                                      onVerDetalle: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                            builder: (_) =>
+                                                IncidenteDetalleScreen(incidente: inc)),
+                                      ),
                                     );
                                   },
                                 ),
@@ -218,7 +231,7 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  Widget _statCard(String label, int valor, Color color) {
+  Widget _statCard(String label, int? valor, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: BoxDecoration(
@@ -228,7 +241,7 @@ class _AdminScreenState extends State<AdminScreen> {
       ),
       child: Column(
         children: [
-          Text('$valor',
+          Text(valor?.toString() ?? '—',
               style: TextStyle(color: color, fontSize: 22, fontWeight: FontWeight.w800)),
           const SizedBox(height: 2),
           Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
@@ -243,16 +256,21 @@ class _TarjetaPendiente extends StatelessWidget {
   final bool procesando;
   final VoidCallback onValidar;
   final VoidCallback onRechazar;
+  final VoidCallback onVerDetalle;
   const _TarjetaPendiente({
     required this.incidente,
     required this.procesando,
     required this.onValidar,
     required this.onRechazar,
+    required this.onVerDetalle,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onVerDetalle,
+      child: Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -279,9 +297,21 @@ class _TarjetaPendiente extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
           const SizedBox(height: 8),
-          Text(
-            '${formatearFechaHora(incidente.fechaIncidente)} · Riesgo ${incidente.nivelRiesgo.toLowerCase()}',
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${formatearFechaHora(incidente.fechaIncidente)} · Riesgo ${incidente.nivelRiesgo.toLowerCase()}',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                ),
+              ),
+              const Text('Ver detalle',
+                  style: TextStyle(
+                      color: AppColors.primaryLight,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600)),
+              const Icon(Icons.chevron_right, size: 16, color: AppColors.primaryLight),
+            ],
           ),
           const SizedBox(height: 12),
           if (procesando)
@@ -317,6 +347,7 @@ class _TarjetaPendiente extends StatelessWidget {
               ],
             ),
         ],
+      ),
       ),
     );
   }

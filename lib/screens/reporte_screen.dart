@@ -1,5 +1,8 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../services/api_service.dart';
 import '../services/eventos_app.dart';
 import '../services/storage_service.dart';
@@ -28,15 +31,53 @@ class _ReporteScreenState extends State<ReporteScreen> {
   bool _errorTipos = false;
 
   Position? _posicion;
+  // Punto que se envía: arranca en el GPS y el usuario puede ajustarlo.
+  LatLng? _punto;
+  GoogleMapController? _mapaCtrl;
   bool _buscandoUbicacion = false;
   String? _errorUbicacion;
+  bool _permisoBloqueado = false;
 
   @override
   void initState() {
     super.initState();
     _cargarTipos();
     _posicion = widget.posicionInicial;
-    if (_posicion == null) _obtenerUbicacion();
+    final pos = _posicion;
+    if (pos == null) {
+      _obtenerUbicacion();
+    } else {
+      _punto = LatLng(pos.latitude, pos.longitude);
+    }
+  }
+
+  bool get _hayCambios =>
+      _tipoSeleccionado != null ||
+      _descCtrl.text.trim().isNotEmpty ||
+      _tipoOtroCtrl.text.trim().isNotEmpty;
+
+  Future<void> _confirmarSalida() async {
+    if (_loading) return;
+    if (_hayCambios) {
+      final salir = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('¿Descartar reporte?'),
+          content: const Text('Se perderá la información que escribiste.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false), child: const Text('Seguir editando')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+              child: const Text('Descartar'),
+            ),
+          ],
+        ),
+      );
+      if (salir != true) return;
+    }
+    if (mounted) Navigator.pop(context);
   }
 
   void _mostrarMensaje(String msg) {
@@ -70,6 +111,7 @@ class _ReporteScreenState extends State<ReporteScreen> {
     setState(() {
       _buscandoUbicacion = true;
       _errorUbicacion = null;
+      _permisoBloqueado = false;
     });
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
@@ -83,11 +125,14 @@ class _ReporteScreenState extends State<ReporteScreen> {
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
         _errorUbicacion = 'Permiso de ubicación denegado';
+        _permisoBloqueado = perm == LocationPermission.deniedForever;
         return;
       }
       final pos = await Geolocator.getCurrentPosition()
           .timeout(const Duration(seconds: 15));
       _posicion = pos;
+      _punto = LatLng(pos.latitude, pos.longitude);
+      _mapaCtrl?.animateCamera(CameraUpdate.newLatLng(_punto!));
     } catch (_) {
       _errorUbicacion = 'No se pudo obtener la ubicación';
     } finally {
@@ -107,7 +152,7 @@ class _ReporteScreenState extends State<ReporteScreen> {
   Future<void> _enviar() async {
     if (!_formKey.currentState!.validate()) return;
     final tipo = _tipoAEnviar;
-    final pos = _posicion;
+    final pos = _punto;
     if (tipo == null) return;
     if (pos == null) {
       _mostrarMensaje('Necesitamos tu ubicación para registrar el reporte');
@@ -155,7 +200,12 @@ class _ReporteScreenState extends State<ReporteScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmarSalida();
+      },
+      child: Scaffold(
       body: SafeArea(
         child: Column(
           children: [
@@ -165,7 +215,8 @@ class _ReporteScreenState extends State<ReporteScreen> {
                 children: [
                   IconButton(
                     icon: const Icon(Icons.arrow_back),
-                    onPressed: () => Navigator.pop(context),
+                    tooltip: 'Volver',
+                    onPressed: _confirmarSalida,
                   ),
                   const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -220,43 +271,25 @@ class _ReporteScreenState extends State<ReporteScreen> {
                       ),
                       const SizedBox(height: 8),
                       LabeledField(label: 'Ubicación', child: _campoUbicacion()),
-                      const SizedBox(height: 16),
-                      LabeledField(
-                        label: 'Fotografía (opcional)',
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () =>
-                              _mostrarMensaje('Función próximamente disponible'),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 28),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                  color: AppColors.border, style: BorderStyle.solid),
-                              color: AppColors.surfaceAlt,
-                            ),
-                            child: const Column(
-                              children: [
-                                Icon(Icons.camera_alt_outlined,
-                                    color: AppColors.textMuted, size: 28),
-                                SizedBox(height: 8),
-                                Text('Toca para añadir foto',
-                                    style: TextStyle(color: AppColors.textMuted)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
                       const SizedBox(height: 24),
                       _loading
                           ? const Center(child: CircularProgressIndicator())
                           : SizedBox(
                               width: double.infinity,
                               child: ElevatedButton(
-                                  onPressed: _posicion == null ? null : _enviar,
+                                  onPressed: _punto == null ? null : _enviar,
                                   child: const Text('Enviar reporte')),
                             ),
+                      if (_punto == null && !_loading) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _buscandoUbicacion
+                              ? 'Esperando tu ubicación para habilitar el envío...'
+                              : 'Necesitamos tu ubicación para poder enviar el reporte.',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: AppColors.warning, fontSize: 12),
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       const Text(
                         'El nivel de riesgo se asigna según el tipo de incidente. '
@@ -271,6 +304,7 @@ class _ReporteScreenState extends State<ReporteScreen> {
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -309,11 +343,10 @@ class _ReporteScreenState extends State<ReporteScreen> {
   }
 
   Widget _campoUbicacion() {
-    final pos = _posicion;
+    final pos = _punto;
+    if (pos != null) return _mapaUbicacion(pos);
     final String texto;
-    if (pos != null) {
-      texto = '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
-    } else if (_buscandoUbicacion) {
+    if (_buscandoUbicacion) {
       texto = 'Obteniendo ubicación...';
     } else {
       texto = _errorUbicacion ?? 'Ubicación no disponible';
@@ -324,27 +357,22 @@ class _ReporteScreenState extends State<ReporteScreen> {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: pos == null && !_buscandoUbicacion
-            ? AppColors.danger
-            : AppColors.border),
+        border: Border.all(color: _buscandoUbicacion ? AppColors.border : AppColors.danger),
       ),
       child: Row(
         children: [
-          Icon(pos != null ? Icons.location_on : Icons.location_off,
-              size: 18,
-              color: pos != null ? AppColors.primaryLight : AppColors.textMuted),
+          const Icon(Icons.location_off, size: 18, color: AppColors.textMuted),
           const SizedBox(width: 8),
           Expanded(child: Text(texto, overflow: TextOverflow.ellipsis)),
-          if (pos != null)
-            const Padding(
-              padding: EdgeInsets.only(left: 6),
-              child: Text('GPS✓',
-                  style: TextStyle(
-                      color: AppColors.success, fontSize: 12, fontWeight: FontWeight.w700)),
-            )
-          else if (_buscandoUbicacion)
+          if (_buscandoUbicacion)
             const SizedBox(
                 width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+          else if (_permisoBloqueado)
+            TextButton(
+                onPressed: () async {
+                  await Geolocator.openAppSettings();
+                },
+                child: const Text('Ajustes'))
           else
             TextButton(onPressed: _obtenerUbicacion, child: const Text('Reintentar')),
         ],
@@ -352,10 +380,73 @@ class _ReporteScreenState extends State<ReporteScreen> {
     );
   }
 
+  Widget _mapaUbicacion(LatLng pos) {
+    final gps = _posicion;
+    final ajustado = gps != null &&
+        (gps.latitude != pos.latitude || gps.longitude != pos.longitude);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            height: 180,
+            child: GoogleMap(
+              initialCameraPosition: CameraPosition(target: pos, zoom: 17),
+              onMapCreated: (c) => _mapaCtrl = c,
+              // El mapa recibe los gestos para poder moverlo dentro del scroll.
+              gestureRecognizers: {
+                Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+              },
+              zoomControlsEnabled: false,
+              mapToolbarEnabled: false,
+              myLocationButtonEnabled: false,
+              onTap: (p) => setState(() => _punto = p),
+              markers: {
+                Marker(
+                  markerId: const MarkerId('reporte'),
+                  position: pos,
+                  draggable: true,
+                  onDragEnd: (p) => setState(() => _punto = p),
+                ),
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Icon(ajustado ? Icons.edit_location_alt : Icons.my_location,
+                size: 14, color: AppColors.textMuted),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                ajustado
+                    ? 'Ubicación ajustada manualmente'
+                    : 'Toca el mapa o arrastra el pin para ajustar',
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+              ),
+            ),
+            if (ajustado)
+              TextButton(
+                onPressed: () {
+                  final p = LatLng(gps.latitude, gps.longitude);
+                  setState(() => _punto = p);
+                  _mapaCtrl?.animateCamera(CameraUpdate.newLatLng(p));
+                },
+                child: const Text('Usar GPS'),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
   @override
   void dispose() {
     _descCtrl.dispose();
     _tipoOtroCtrl.dispose();
+    _mapaCtrl?.dispose();
     super.dispose();
   }
 }

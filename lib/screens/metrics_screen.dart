@@ -4,6 +4,7 @@ import '../models/metricas.dart';
 import '../services/api_service.dart';
 import '../services/storage_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/mensaje_lista.dart';
 
 class MetricsScreen extends StatefulWidget {
   const MetricsScreen({super.key});
@@ -15,6 +16,7 @@ class _MetricsScreenState extends State<MetricsScreen> {
   Metricas? _metricas;
   List<Incidente> _todos = [];
   bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
@@ -23,21 +25,37 @@ class _MetricsScreenState extends State<MetricsScreen> {
   }
 
   Future<void> _cargar() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final token = await StorageService.getToken();
-      final resMetricas = await ApiService.get('/admin/metricas', token: token);
-      final resIncidentes = await ApiService.get('/incidentes', token: token);
+      final respuestas = await Future.wait([
+        ApiService.get('/admin/metricas', token: token),
+        ApiService.get('/incidentes', token: token),
+      ]);
+      final resMetricas = respuestas[0];
+      final resIncidentes = respuestas[1];
       if (resMetricas.statusCode == 200) {
         _metricas = Metricas.fromJson(ApiService.decodificar(resMetricas));
+      } else {
+        _error = 'No se pudieron cargar las métricas';
       }
       if (resIncidentes.statusCode == 200) {
         _todos = (ApiService.decodificar(resIncidentes) as List)
             .map((j) => Incidente.fromJson(j))
             .toList();
       }
-    } catch (_) {}
-    if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      _error = ApiService.mensajeExcepcion(e);
+    }
+    if (!mounted) return;
+    setState(() => _loading = false);
+    // Si ya había datos en pantalla se conservan y solo se avisa del fallo.
+    if (_error != null && _metricas != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_error!)));
+    }
   }
 
   Map<String, int> _conteoPor(String Function(Incidente) key) {
@@ -66,44 +84,51 @@ class _MetricsScreenState extends State<MetricsScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : m == null
-                ? Center(
+        child: Column(
+          children: [
+            // La cabecera queda fuera de la lista para poder volver incluso
+            // mientras carga o si hubo un error.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 8, 16, 4),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back),
+                    tooltip: 'Volver',
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  const Expanded(
                     child: Column(
-                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('No se pudieron cargar las métricas',
-                            style: TextStyle(color: AppColors.textMuted)),
-                        const SizedBox(height: 12),
-                        OutlinedButton(onPressed: _cargar, child: const Text('Reintentar')),
+                        Text('Panel de métricas',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                        Text('Datos en vivo desde el servidor',
+                            style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
                       ],
                     ),
-                  )
-                : ListView(
+                  ),
+                  IconButton(
+                      icon: const Icon(Icons.refresh),
+                      tooltip: 'Actualizar',
+                      onPressed: _loading ? null : _cargar),
+                ],
+              ),
+            ),
+            Expanded(
+              child: _loading && m == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : RefreshIndicator(
+                onRefresh: _cargar,
+                child: m == null
+                  ? MensajeLista(
+                      mensaje: _error ?? 'No se pudieron cargar las métricas',
+                      icono: Icons.cloud_off_rounded,
+                      onReintentar: _cargar)
+                  : ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                     children: [
-                      Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.arrow_back),
-                            onPressed: () => Navigator.pop(context),
-                          ),
-                          const Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Panel de métricas',
-                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-                                Text('Datos en vivo desde el servidor',
-                                    style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
-                              ],
-                            ),
-                          ),
-                          IconButton(icon: const Icon(Icons.refresh), onPressed: _cargar),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
                       GridView.count(
                         crossAxisCount: 2,
                         shrinkWrap: true,
@@ -149,7 +174,7 @@ class _MetricsScreenState extends State<MetricsScreen> {
                             sub: 'Total acumulado',
                           ),
                           _tile(
-                            icon: Icons.person_off_rounded,
+                            icon: Icons.block_rounded,
                             color: AppColors.riesgoAlto,
                             valor: '${m.porEstado['RECHAZADO'] ?? 0}',
                             label: 'Reportes rechazados',
@@ -232,6 +257,10 @@ class _MetricsScreenState extends State<MetricsScreen> {
                       ),
                     ],
                   ),
+                ),
+            ),
+          ],
+        ),
       ),
     );
   }
