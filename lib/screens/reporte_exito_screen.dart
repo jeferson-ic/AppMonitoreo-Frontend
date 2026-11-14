@@ -43,7 +43,7 @@ class ReporteExitoScreen extends StatelessWidget {
               Text(
                 _yaValidado
                     ? 'Tu incidente coincidió con otros reportes cercanos y ya fue validado automáticamente.'
-                    : 'Tu incidente ha sido registrado y está siendo procesado por el sistema de validación automática.',
+                    : 'Tu incidente fue registrado. Se confirmará cuando otros usuarios reporten lo mismo en la zona o cuando un moderador lo revise.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: AppColors.textSecondary, height: 1.4),
               ),
@@ -94,8 +94,8 @@ class ReporteExitoScreen extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       _yaValidado
-                          ? 'Ya es visible para otros usuarios en el mapa.'
-                          : 'Recibirás una notificación cuando tu reporte sea validado.',
+                          ? 'Ya cuenta para las alertas y zonas de riesgo del mapa.'
+                          : 'Se ve en el mapa como "sin confirmar" y aún no genera alertas. Revisa su estado en Mis reportes.',
                       style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                     ),
                   ],

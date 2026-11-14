@@ -1,0 +1,29 @@
+name: CI Flutter
+
+# Revisa el código y ejecuta las pruebas en cada push y en cada Pull Request.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  analizar-y-probar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Preparar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Descargar dependencias
+        run: flutter pub get
+
+      - name: Análisis estático
+        run: flutter analyze --no-fatal-infos
+
+      - name: Pruebas
+        run: flutter test

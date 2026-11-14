@@ -13,8 +13,18 @@ const _meses = [
   'dic',
 ];
 
-String formatearFechaHora(String raw) {
+/// Convierte la fecha que envía el backend a la hora local del teléfono.
+/// El backend envía la hora de Perú sin zona horaria (yyyy-MM-ddTHH:mm:ss),
+/// que se usa tal cual. Si alguna vez llega con zona (Z o -05:00), se
+/// convierte a la hora local para no mostrarla adelantada.
+DateTime? leerFecha(String raw) {
   final fecha = DateTime.tryParse(raw);
+  if (fecha == null) return null;
+  return fecha.isUtc ? fecha.toLocal() : fecha;
+}
+
+String formatearFechaHora(String raw) {
+  final fecha = leerFecha(raw);
   if (fecha == null) return raw;
   final dia = fecha.day.toString();
   final mes = _meses[fecha.month - 1];
@@ -24,7 +34,7 @@ String formatearFechaHora(String raw) {
 }
 
 String formatearFecha(String raw) {
-  final fecha = DateTime.tryParse(raw);
+  final fecha = leerFecha(raw);
   if (fecha == null) return raw;
   final dia = fecha.day.toString();
   final mes = _meses[fecha.month - 1];
@@ -32,7 +42,7 @@ String formatearFecha(String raw) {
 }
 
 bool esHoy(String raw) {
-  final fecha = DateTime.tryParse(raw);
+  final fecha = leerFecha(raw);
   if (fecha == null) return false;
   final ahora = DateTime.now();
   return fecha.year == ahora.year && fecha.month == ahora.month && fecha.day == ahora.day;
