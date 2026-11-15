@@ -113,6 +113,10 @@ class _AdminScreenState extends State<AdminScreen> {
       } else if (res.statusCode == 404) {
         _mostrarMensaje('El reporte ya no existe');
         await _cargar();
+      } else if (res.statusCode == 409) {
+        // Otro moderador o el consenso automático ya cambió su estado.
+        _mostrarMensaje('El reporte ya fue atendido; se actualizó la lista');
+        await _cargar();
       } else if (res.statusCode != 401) {
         _mostrarMensaje(ApiService.mensajeError(res));
       }

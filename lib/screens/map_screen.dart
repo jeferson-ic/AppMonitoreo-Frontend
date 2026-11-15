@@ -222,6 +222,14 @@ class _MapScreenState extends State<MapScreen> {
                   style: const TextStyle(color: AppColors.textSecondary, height: 1.4)),
               const SizedBox(height: 12),
               EstadoBadge(estado: inc.estado),
+              if (!inc.estaValidado) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  'Reporte sin confirmar: aún no genera alertas. Se valida cuando 3 usuarios '
+                  'reportan lo mismo en la zona o cuando un moderador lo revisa.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.4),
+                ),
+              ],
               const SizedBox(height: 16),
               ElevatedButton(
                 onPressed: () {
@@ -258,6 +266,7 @@ class _MapScreenState extends State<MapScreen> {
       markerId: MarkerId(inc.idIncidente.toString()),
       position: LatLng(inc.latitud, inc.longitud),
       icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+      alpha: inc.opacidadMarcador,
       onTap: () => _mostrarResumen(inc),
     );
   }
@@ -541,6 +550,8 @@ class _MapScreenState extends State<MapScreen> {
           _leyendaFila(AppColors.riesgoMedio, 'Riesgo Medio'),
           const SizedBox(height: 4),
           _leyendaFila(AppColors.riesgoBajo, 'Riesgo Bajo'),
+          const SizedBox(height: 4),
+          _leyendaFila(AppColors.textMuted.withValues(alpha: 0.45), 'Sin confirmar'),
           const SizedBox(height: 4),
           Row(
             children: [

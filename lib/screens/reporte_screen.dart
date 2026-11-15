@@ -19,11 +19,8 @@ class ReporteScreen extends StatefulWidget {
 }
 
 class _ReporteScreenState extends State<ReporteScreen> {
-  static const _otro = 'Otro';
-
   final _formKey = GlobalKey<FormState>();
   final _descCtrl = TextEditingController();
-  final _tipoOtroCtrl = TextEditingController();
   List<String> _tipos = [];
   String? _tipoSeleccionado;
   bool _loading = false;
@@ -53,8 +50,7 @@ class _ReporteScreenState extends State<ReporteScreen> {
 
   bool get _hayCambios =>
       _tipoSeleccionado != null ||
-      _descCtrl.text.trim().isNotEmpty ||
-      _tipoOtroCtrl.text.trim().isNotEmpty;
+      _descCtrl.text.trim().isNotEmpty;
 
   Future<void> _confirmarSalida() async {
     if (_loading) return;
@@ -96,7 +92,7 @@ class _ReporteScreenState extends State<ReporteScreen> {
       if (!mounted) return;
       if (res.statusCode == 200) {
         final lista = (ApiService.decodificar(res) as List).cast<String>();
-        setState(() => _tipos = [...lista, _otro]);
+        setState(() => _tipos = lista);
       } else {
         setState(() => _errorTipos = true);
       }
@@ -140,18 +136,9 @@ class _ReporteScreenState extends State<ReporteScreen> {
     }
   }
 
-  String? get _tipoAEnviar {
-    if (_tipoSeleccionado == null) return null;
-    if (_tipoSeleccionado == _otro) {
-      final texto = _tipoOtroCtrl.text.trim();
-      return texto.isEmpty ? null : texto;
-    }
-    return _tipoSeleccionado;
-  }
-
   Future<void> _enviar() async {
     if (!_formKey.currentState!.validate()) return;
-    final tipo = _tipoAEnviar;
+    final tipo = _tipoSeleccionado;
     final pos = _punto;
     if (tipo == null) return;
     if (pos == null) {
@@ -239,22 +226,6 @@ class _ReporteScreenState extends State<ReporteScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       LabeledField(label: 'Tipo de incidente', child: _campoTipo()),
-                      if (_tipoSeleccionado == _otro) ...[
-                        const SizedBox(height: 12),
-                        LabeledField(
-                          label: 'Especifica el tipo',
-                          child: TextFormField(
-                            controller: _tipoOtroCtrl,
-                            decoration: const InputDecoration(hintText: 'Ej. Incendio'),
-                            maxLength: 50,
-                            textCapitalization: TextCapitalization.sentences,
-                            validator: (v) => (_tipoSeleccionado == _otro &&
-                                    (v == null || v.trim().isEmpty))
-                                ? 'Requerido'
-                                : null,
-                          ),
-                        ),
-                      ],
                       const SizedBox(height: 16),
                       LabeledField(
                         label: 'Descripción',
@@ -445,7 +416,6 @@ class _ReporteScreenState extends State<ReporteScreen> {
   @override
   void dispose() {
     _descCtrl.dispose();
-    _tipoOtroCtrl.dispose();
     _mapaCtrl?.dispose();
     super.dispose();
   }

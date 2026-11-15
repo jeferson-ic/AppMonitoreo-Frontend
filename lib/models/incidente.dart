@@ -26,6 +26,14 @@ class Incidente {
 
   String get codigo => codigoDe(idIncidente);
 
+  /// Solo los incidentes validados (por consenso o por un moderador)
+  /// generan alertas y cuentan para las zonas de riesgo.
+  bool get estaValidado => estado.toUpperCase() == 'VALIDADO';
+
+  /// Opacidad del marcador en el mapa: los reportes sin confirmar se ven
+  /// semitransparentes para distinguirlos de los validados.
+  double get opacidadMarcador => estaValidado ? 1.0 : 0.45;
+
   factory Incidente.fromJson(Map<String, dynamic> j) => Incidente(
         idIncidente: j['idIncidente'] ?? 0,
         tipoIncidente: j['tipoIncidente'] ?? '',
